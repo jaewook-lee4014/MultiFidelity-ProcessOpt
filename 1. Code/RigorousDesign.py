@@ -1,4 +1,3 @@
-
 import pdb
 import optuna
 import time
@@ -14,7 +13,7 @@ import warnings
 # from BayesianNN import *
 import traceback
 
-class ShortCutDesign():
+class RigorousDesign():
     def __init__(self, verbose=False):
         bst.nbtutorial() # For light-mode diagrams, ignore warnings
         self.set_base_model()
@@ -22,7 +21,7 @@ class ShortCutDesign():
         self.verbose = verbose
         self.history = []  # 최적화 과정 저장
         self.error_num = 0
-        print(" ##### An instance of the 'ShortCutDesign' class  has been initialised!")
+        print(" ##### An instance of the 'RigorousDesign' class  has been initialised!")
     
     def set_base_model(self):
         # relevant values based on the website example
@@ -32,7 +31,13 @@ class ShortCutDesign():
         # _T_hex = 310
         # _Lr3, _Hr3, _k3  = [0.99, 0.99, 1.5]
         X = [12, 0.95, 0.95, 0.999, 0.999,  310, 0.99, 0.99, ]
-        self._set(X)
+        heuristic_parameters = {'BoilupRatio': 4.48,
+                                'Distillate': None,
+                                'SplitRatio': 0.287,
+                                'NumberStages': 9,
+                                'FeedStage': 7,}
+        print('setting base model')
+        self._SetRigorous(X, heuristic_parameters)
         
     def _bounds(self):
         # bounds for variables. feel free to change!
@@ -55,11 +60,16 @@ class ShortCutDesign():
         return ints
         
     
-    def _set(self, X):
-        
+    def _SetRigorous(self, X, heuristic_parameters):
+        print('setting model: ', heuristic_parameters)
         # Define chemicals used in the process
         bst.settings.set_thermo(['Water', 'AceticAcid', 'EthylAcetate'])
 
+        boilup = heuristic_parameters['BoilupRatio']
+        distillate = heuristic_parameters['Distillate']
+        split = heuristic_parameters['SplitRatio']
+        N_stages = heuristic_parameters['NumberStages']
+        feed_stage = heuristic_parameters['FeedStage']
         
         _n1 = X[0] # number of stages for extractor
         _Lr1, _Hr1,   = X[1], X[2]
@@ -78,8 +88,10 @@ class ShortCutDesign():
         # Amount of ethyl-acetate to fermentation broth
         solvent_feed_ratio = 1.5
 
+        reflux = bst.Stream('reflux')
         # Fermentation broth with dilute acetic acid
         acetic_acid_broth = bst.Stream(ID='acetic_acid_broth', AceticAcid=1000, Water=9000, units='kg/hr')
+        print(acetic_acid_broth.F_mass)
 
         # Solvent
         ethyl_acetate = bst.Stream(ID='ethyl_acetate',  EthylAcetate=1)
@@ -91,12 +103,11 @@ class ShortCutDesign():
         # Recycles
         solvent_recycle = bst.Stream('solvent_rich')
         water_rich = bst.Stream('water_rich')
-        distillate = bst.Stream('raffinate_distillate')
+        # distillate = bst.Stream('raffinate_distillate')
         
         
         # System and unit operations
         with bst.System('AAsep') as sys:
-            print(f"stages: {_n1}")
             extractor = bst.MultiStageMixerSettlers(
                 'extractor',
                 ins=(acetic_acid_broth, ethyl_acetate, solvent_recycle),
@@ -127,15 +138,16 @@ class ShortCutDesign():
                 rigorous=True,
                 V=0,
             )
-            ED = bst.ShortcutColumn(
+            ED = bst.MESHDistillation(
                 'extract_distiller',
-                ins=HX-0,
-                outs=['', 'acetic_acid'],
+                ins=(HX-0, reflux),
+                outs=('', 'acetic_acid', 'distillate'),
+                feed_stages=[feed_stage-2, 1],
+                N_stages=N_stages,
+                full_condenser=True,
+                boilup=boilup,
                 LHK=('Water', 'AceticAcid'),
-                Lr=_Lr1,
-                Hr=_Hr1,
-                k=_k1,
-                partial_condenser=False,
+                use_cache=True,
             )
             ED2 = bst.ShortcutColumn(
                 'acetic_acid_purification',
@@ -149,14 +161,20 @@ class ShortCutDesign():
             )
             ED.check_LHK = ED2.check_LHK = False
             mixer = bst.Mixer(
-                ins=(ED-0, ED2-0, distillate)
+                ins=(ED-2, ED2-0, distillate)
             )
             HX = bst.HXutility(ins=mixer-0, T=_T_hex)
             settler = bst.MixerSettler(
                 'settler',
                 ins=HX-0,
-                outs=(solvent_recycle, water_rich),
+                outs=('', water_rich),
                 top_chemical='EthylAcetate',
+            )
+            splitter = bst.Splitter(
+                'splitter',
+                ins=settler-0,
+                outs=(reflux, solvent_recycle),
+                split=split,
             )
             mixer = bst.Mixer(ins=[extractor.raffinate, water_rich])
             RD = bst.ShortcutColumn(
@@ -171,8 +189,12 @@ class ShortCutDesign():
             )
             
         sys.operating_hours = 330 * 24 # annual operating hours, hr/yr
+        sys.set_tolerance(rmol=1e-3, mol=1e-3, subsystems=True)
         self.ED = ED
         self.sys = sys
+
+
+
 
     def capex(self):
         # capex of equipment in MMUSD/yr
@@ -237,7 +259,7 @@ class ShortCutDesign():
         print('acetic_acid: ', x_achieved)
         return cons
     
-    def shortcut_results(self, X=None):
+    def check_results(self, X=None, heuristic_parameters=None):
         print(X)
         start_time = time.time() 
 
@@ -246,48 +268,35 @@ class ShortCutDesign():
                 self.set_base_model()
                 
             else:# set and run the simulation
-                self._set(X) # set the new operating parameters
+                self._SetRigorous(X, heuristic_parameters) # set the new operating parameters
                     
             self.simulate() # run the simulation
-            outlet = self.ED.reboiler.outs[0]
-            boilup = outlet['g'].F_mol / outlet['l'].F_mol
-            distillate, condensate = self.ED.top_split.outs
-            split = condensate.F_mol / self.ED.condenser.outs[0].F_mol # Or from ED.design_results['Reflux']
-            N_stages = int(self.ED.design_results['Theoretical stages'])
-            feed_stage = int(self.ED.design_results['Theoretical feed stage'])
+            
+            # assess plant financials
+            
+            
             elapsed_time = time.time() - start_time  # ⏳ 경과 시간 기록
+
+            # self.history.append([self.nEval, objective_function, self.wt_acetic_acid(), elapsed_time])
 
         # if failure for any reason, then reutrn a value of np.inf
         except Exception as e:
             print("Error occurred:", e)
+            # traceback.print_exc()
             
             objective_function = 100
             elapsed_time = time.time() - start_time  # ⏳ 에러 발생 시에도 시간 기록
             self.history.append([self.nEval, objective_function, self.wt_acetic_acid(), elapsed_time])
-            return {"CAPEX": 0,
-                    "OPEX": 0,
-                    "AceticAcidWt": 0,
-                    "BoilupRatio": 0,
-                    "Distillate": 0,
-                    "SplitRatio": 0,
-                    "NumberStages": 0,
-                    "FeedStage": 0}
+            
+            return self.capex(), self.opex(), self.wt_acetic_acid()
 
-        
 
         if self.verbose:
             print(f"Iteration {self.nEval}: MSP = {round(objective_function, 2)}, Time = {elapsed_time:.2f} sec")
 
-        return {"CAPEX": self.capex(),
-                "OPEX": self.opex(),
-                "AceticAcidWt": self.wt_acetic_acid(),
-                "BoilupRatio": boilup,
-                "Distillate": distillate,
-                "SplitRatio": split,
-                "NumberStages": N_stages,
-                "FeedStage": feed_stage}
+        return self.capex(), self.opex(), self.wt_acetic_acid()
     
-    def func(self, X=None):
+    def func(self, X=None, heuristic_parameters=None):
         print(X)
         start_time = time.time() 
 
@@ -296,7 +305,7 @@ class ShortCutDesign():
                 self.set_base_model()
                 
             else:# set and run the simulation
-                self._set(X) # set the new operating parameters
+                self._SetRigorous(X, heuristic_parameters) # set the new operating parameters
                     
             self.simulate() # run the simulation
             
