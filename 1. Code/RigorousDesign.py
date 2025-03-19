@@ -31,11 +31,23 @@ class RigorousDesign():
         # _T_hex = 310
         # _Lr3, _Hr3, _k3  = [0.99, 0.99, 1.5]
         X = [12, 0.95, 0.95, 0.999, 0.999,  310, 0.99, 0.99, ]
-        heuristic_parameters = {'BoilupRatio': 4.48,
-                                'Distillate': None,
-                                'SplitRatio': 0.287,
-                                'NumberStages': 9,
-                                'FeedStage': 7,}
+        # heuristic_parameters = {'BoilupRatio': 4.48,
+        #                         'Distillate': None,
+        #                         'SplitRatio': 0.287,
+        #                         'NumberStages': 9,
+        #                         'FeedStage': 7,}
+
+        heuristic_parameters = {'SplitRatio': 0.287,
+                                'boilup_1': 4.48,
+                                'N_stages_1': 9,
+                                'feed_stage_1': 7,
+                                'boilup_2': 4.48,  # Defaulting to the same value for now
+                                'N_stages_2': 9,
+                                'feed_stage_2': 7,
+                                'boilup_3': 4.48,  # Defaulting to the same value for now
+                                'N_stages_3': 9,
+                                'feed_stage_3': 7,}
+
         print('setting base model')
         self._SetRigorous(X, heuristic_parameters)
         
@@ -65,11 +77,20 @@ class RigorousDesign():
         # Define chemicals used in the process
         bst.settings.set_thermo(['Water', 'AceticAcid', 'EthylAcetate'])
 
-        boilup = heuristic_parameters['BoilupRatio']
-        distillate = heuristic_parameters['Distillate']
+        # distillate = heuristic_parameters['Distillate']
         split = heuristic_parameters['SplitRatio']
-        N_stages = heuristic_parameters['NumberStages']
-        feed_stage = heuristic_parameters['FeedStage']
+
+        boilup_1 = heuristic_parameters['boilup_1']
+        N_stages_1 = heuristic_parameters['N_stages_1']
+        feed_stage_1 = heuristic_parameters['feed_stage_1']
+
+        boilup_2 = heuristic_parameters['boilup_2']
+        N_stages_2 = heuristic_parameters['N_stages_2']
+        feed_stage_2 = heuristic_parameters['feed_stage_2']
+
+        boilup_3 = heuristic_parameters['boilup_3']
+        N_stages_3 = heuristic_parameters['N_stages_3']
+        feed_stage_3 = heuristic_parameters['feed_stage_3']
         
         _n1 = X[0] # number of stages for extractor
         _Lr1, _Hr1,   = X[1], X[2]
@@ -103,7 +124,7 @@ class RigorousDesign():
         # Recycles
         solvent_recycle = bst.Stream('solvent_rich')
         water_rich = bst.Stream('water_rich')
-        # distillate = bst.Stream('raffinate_distillate')
+        distillate = bst.Stream('raffinate_distillate')
         
         
         # System and unit operations
@@ -142,23 +163,36 @@ class RigorousDesign():
                 'extract_distiller',
                 ins=(HX-0, reflux),
                 outs=('', 'acetic_acid', 'distillate'),
-                feed_stages=[feed_stage-2, 1],
-                N_stages=N_stages,
+                feed_stages=[feed_stage_1-2, 1],
+                N_stages=N_stages_1,
                 full_condenser=True,
-                boilup=boilup,
+                boilup=boilup_1,
                 LHK=('Water', 'AceticAcid'),
                 use_cache=True,
             )
-            ED2 = bst.ShortcutColumn(
+
+            ED2 = bst.MESHDistillation(
                 'acetic_acid_purification',
                 ins=ED-1,
                 outs=('', glacial_acetic_acid),
+                feed_stages=[feed_stage_2-2, 1],
+                N_stages=N_stages_2,
+                boilup=boilup_2,
                 LHK=('EthylAcetate', 'AceticAcid'),
-                Lr=_Lr2,
-                Hr=_Hr2,
-                k=_k2,
-                partial_condenser=False
+                use_cache=True,
             )
+
+            # ED2 = bst.ShortcutColumn(
+            #     'acetic_acid_purification',
+            #     ins=ED-1,
+            #     outs=('', glacial_acetic_acid),
+            #     LHK=('EthylAcetate', 'AceticAcid'),
+            #     Lr=_Lr2,
+            #     Hr=_Hr2,
+            #     k=_k2,
+            #     partial_condenser=False
+            # )
+
             ED.check_LHK = ED2.check_LHK = False
             mixer = bst.Mixer(
                 ins=(ED-2, ED2-0, distillate)
@@ -177,6 +211,7 @@ class RigorousDesign():
                 split=split,
             )
             mixer = bst.Mixer(ins=[extractor.raffinate, water_rich])
+            
             RD = bst.ShortcutColumn(
                 'raffinate_distiller',
                 LHK=('EthylAcetate', 'Water'),
@@ -188,6 +223,18 @@ class RigorousDesign():
                 k=_k3,
             )
             
+            # RD = bst.MESHDistillation(
+            #     'raffinate_distiller',
+            #     ins=mixer-0,
+            #     outs=[distillate, wastewater],
+            #     # full_condenser=True,
+            #     feed_stages=[feed_stage_3-2, 1],
+            #     N_stages=N_stages_3,
+            #     boilup=boilup_3,
+            #     LHK=('EthylAcetate', 'Water'),
+            #     use_cache=True,
+            # )
+
         sys.operating_hours = 330 * 24 # annual operating hours, hr/yr
         sys.set_tolerance(rmol=1e-3, mol=1e-3, subsystems=True)
         self.ED = ED
@@ -288,13 +335,13 @@ class RigorousDesign():
             elapsed_time = time.time() - start_time  # ⏳ 에러 발생 시에도 시간 기록
             self.history.append([self.nEval, objective_function, self.wt_acetic_acid(), elapsed_time])
             
-            return self.capex(), self.opex(), self.wt_acetic_acid()
+            return self.capex(), self.opex(), self.wt_acetic_acid(), elapsed_time
 
 
         if self.verbose:
             print(f"Iteration {self.nEval}: MSP = {round(objective_function, 2)}, Time = {elapsed_time:.2f} sec")
 
-        return self.capex(), self.opex(), self.wt_acetic_acid()
+        return self.capex(), self.opex(), self.wt_acetic_acid(), elapsed_time
     
     def func(self, X=None, heuristic_parameters=None):
         print(X)

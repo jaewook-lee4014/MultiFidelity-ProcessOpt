@@ -22,7 +22,7 @@ class ShortCutDesign():
         self.verbose = verbose
         self.history = []  # 최적화 과정 저장
         self.error_num = 0
-        print(" ##### An instance of the 'ShortCutDesign' class  has been initialised!")
+        print(" ##### An instance of the 'BlackBox' class  has been initialised!")
     
     def set_base_model(self):
         # relevant values based on the website example
@@ -31,6 +31,7 @@ class ShortCutDesign():
         # _Lr2, _Hr2, _k2  = [0.999, 0.999, 1.4]
         # _T_hex = 310
         # _Lr3, _Hr3, _k3  = [0.99, 0.99, 1.5]
+        # X = [12, 0.95, 0.95, 0.999, 0.999,  310, 0.99, 0.99, ]
         X = [12, 0.95, 0.95, 0.999, 0.999,  310, 0.99, 0.99, ]
         self._set(X)
         
@@ -96,16 +97,22 @@ class ShortCutDesign():
         
         # System and unit operations
         with bst.System('AAsep') as sys:
-            print(f"stages: {_n1}")
-            extractor = bst.MultiStageMixerSettlers(
+            # print(f"stages: {_n1}")
+            # extractor = bst.MultiStageMixerSettlers(
+            #     'extractor',
+            #     ins=(acetic_acid_broth, ethyl_acetate, solvent_recycle),
+            #     outs=('extract', 'raffinate'),
+            #     top_chemical='EthylAcetate',
+            #     feed_stages=(0, -1, -1),
+            #     N_stages=_n1,
+            #     use_cache=True,
+            # )
+            extractor = bst.MixerSettler(
                 'extractor',
                 ins=(acetic_acid_broth, ethyl_acetate, solvent_recycle),
                 outs=('extract', 'raffinate'),
                 top_chemical='EthylAcetate',
-                feed_stages=(0, -1, -1),
-                N_stages=_n1,
-                use_cache=True,
-            )
+                )
 
             @extractor.add_specification(run=True)
             def adjust_fresh_solvent_flow_rate():
@@ -172,6 +179,10 @@ class ShortCutDesign():
             
         sys.operating_hours = 330 * 24 # annual operating hours, hr/yr
         self.ED = ED
+        self.ED2 = ED2
+        self.RD = RD
+        self.extractor = extractor
+        
         self.sys = sys
 
     def capex(self):
@@ -249,13 +260,28 @@ class ShortCutDesign():
                 self._set(X) # set the new operating parameters
                     
             self.simulate() # run the simulation
-            outlet = self.ED.reboiler.outs[0]
-            boilup = outlet['g'].F_mol / outlet['l'].F_mol
+            
+            
             distillate, condensate = self.ED.top_split.outs
             split = condensate.F_mol / self.ED.condenser.outs[0].F_mol # Or from ED.design_results['Reflux']
-            N_stages = int(self.ED.design_results['Theoretical stages'])
-            feed_stage = int(self.ED.design_results['Theoretical feed stage'])
+
+            outlet = self.ED.reboiler.outs[0]
+            boilup_1 = outlet['g'].F_mol / outlet['l'].F_mol
+            N_stages_1 = int(self.ED.design_results['Theoretical stages'])
+            feed_stage_1 = int(self.ED.design_results['Theoretical feed stage'])
+
+            outlet = self.ED2.reboiler.outs[0]
+            boilup_2 = outlet['g'].F_mol / outlet['l'].F_mol
+            N_stages_2 = int(self.ED2.design_results['Theoretical stages'])
+            feed_stage_2 = int(self.ED2.design_results['Theoretical feed stage'])
+
+            outlet = self.RD.reboiler.outs[0]
+            boilup_3 = outlet['g'].F_mol / outlet['l'].F_mol
+            N_stages_3 = int(self.RD.design_results['Theoretical stages'])
+            feed_stage_3 = int(self.RD.design_results['Theoretical feed stage'])
+
             elapsed_time = time.time() - start_time  # ⏳ 경과 시간 기록
+
 
         # if failure for any reason, then reutrn a value of np.inf
         except Exception as e:
@@ -267,25 +293,46 @@ class ShortCutDesign():
             return {"CAPEX": 0,
                     "OPEX": 0,
                     "AceticAcidWt": 0,
-                    "BoilupRatio": 0,
-                    "Distillate": 0,
                     "SplitRatio": 0,
-                    "NumberStages": 0,
-                    "FeedStage": 0}
+                    "boilup_1": 0,
+                    "N_stages_1": 0,
+                    "feed_stage_1": 0,
+                    "boilup_2": 0,
+                    "N_stages_2": 0,
+                    "feed_stage_2": 0,
+                    "boilup_3": 0,
+                    "N_stages_3": 0,
+                    "feed_stage_3": 0,
+                    "shortcut_time": elapsed_time,}
 
         
 
         if self.verbose:
             print(f"Iteration {self.nEval}: MSP = {round(objective_function, 2)}, Time = {elapsed_time:.2f} sec")
 
+        # return {"CAPEX": self.capex(),
+        #         "OPEX": self.opex(),
+        #         "AceticAcidWt": self.wt_acetic_acid(),
+        #         "BoilupRatio": boilup,
+        #         "Distillate": distillate,
+        #         "SplitRatio": split,
+        #         "NumberStages": N_stages,
+        #         "FeedStage": feed_stage}
+
         return {"CAPEX": self.capex(),
                 "OPEX": self.opex(),
                 "AceticAcidWt": self.wt_acetic_acid(),
-                "BoilupRatio": boilup,
-                "Distillate": distillate,
                 "SplitRatio": split,
-                "NumberStages": N_stages,
-                "FeedStage": feed_stage}
+                "boilup_1": boilup_1,
+                "N_stages_1": N_stages_1,
+                "feed_stage_1": feed_stage_1,
+                "boilup_2": boilup_2,
+                "N_stages_2": N_stages_2,
+                "feed_stage_2": feed_stage_2,
+                "boilup_3": boilup_3,
+                "N_stages_3": N_stages_3,
+                "feed_stage_3": feed_stage_3,
+                "shortcut_time": elapsed_time,}
     
     def func(self, X=None):
         print(X)
