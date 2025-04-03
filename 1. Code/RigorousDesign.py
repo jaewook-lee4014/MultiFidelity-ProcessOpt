@@ -372,13 +372,13 @@ class RigorousDesign():
             elapsed_time = time.time() - start_time  # ⏳ 에러 발생 시에도 시간 기록
             self.history.append([self.nEval, objective_function, self.wt_acetic_acid(), elapsed_time])
             
-            return objective_function
+            return self.capex(), self.opex(), self.wt_acetic_acid(), elapsed_time, objective_function
 
 
         if self.verbose:
             print(f"Iteration {self.nEval}: MSP = {round(objective_function, 2)}, Time = {elapsed_time:.2f} sec")
 
-        return objective_function
+        return self.capex(), self.opex(), self.wt_acetic_acid(), elapsed_time, objective_function
     
     def natural_units(self, X):
         X_natural = np.zeros((np.shape(X)))
