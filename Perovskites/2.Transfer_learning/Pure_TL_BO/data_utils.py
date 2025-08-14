@@ -10,6 +10,37 @@ def load_lookup_table(file_path: str) -> Dict:
         return pickle.load(f)
 
 
+def create_param_space(lookup_table: Dict) -> Dict[str, List[str]]:
+    """
+    Create parameter space from lookup table
+    
+    Args:
+        lookup_table: Loaded lookup table dictionary
+        
+    Returns:
+        Parameter space with organic, cation, and anion options
+    """
+    # Extract unique organics (first level keys)
+    organics = list(lookup_table.keys())
+    
+    # Extract cations and anions from the first organic
+    first_organic = organics[0]
+    cations = list(lookup_table[first_organic].keys())
+    
+    # Extract anions from the first cation
+    first_cation = cations[0]
+    anions = list(lookup_table[first_organic][first_cation].keys())
+    
+    # Convert to lowercase for consistency
+    organics_lower = [org.lower() for org in organics]
+    
+    return {
+        'organic': organics_lower,
+        'cation': cations,
+        'anion': anions
+    }
+
+
 def create_label_maps(param_space: Dict[str, List[str]]) -> Dict[str, Dict[str, int]]:
     """
     파라미터 공간에서 라벨 매핑 생성

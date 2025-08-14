@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.metrics import r2_score, mean_absolute_error
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 
 def plot_iteration_results(ori_data: pd.DataFrame, y_pred: np.ndarray, y_std: np.ndarray, 
@@ -271,4 +271,50 @@ def plot_multiple_runs_summary(results_df: pd.DataFrame) -> None:
     print(f"Median cost: {results_df['total_cost'].median():.2f}")
     print(f"Std cost: {results_df['total_cost'].std():.2f}")
     print(f"Min cost: {results_df['total_cost'].min():.2f}")
-    print(f"Max cost: {results_df['total_cost'].max():.2f}") 
+    print(f"Max cost: {results_df['total_cost'].max():.2f}")
+
+
+def plot_optimization_results(result: Dict) -> None:
+    """
+    최적화 결과를 종합적으로 시각화
+    
+    Args:
+        result: 최적화 결과 딕셔너리
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    
+    # 1. Convergence plot
+    if 'best_values_history' in result:
+        axes[0, 0].plot(result['best_values_history'])
+        axes[0, 0].set_xlabel('Iteration')
+        axes[0, 0].set_ylabel('Best Value')
+        axes[0, 0].set_title('Convergence')
+        axes[0, 0].grid(True, alpha=0.3)
+    
+    # 2. Cost accumulation
+    if 'cost_history' in result:
+        axes[0, 1].plot(np.cumsum(result['cost_history']))
+        axes[0, 1].set_xlabel('Iteration')
+        axes[0, 1].set_ylabel('Cumulative Cost')
+        axes[0, 1].set_title('Cost Accumulation')
+        axes[0, 1].grid(True, alpha=0.3)
+    
+    # 3. Fidelity selection
+    if 'fidelity_history' in result:
+        fidelities = result['fidelity_history']
+        axes[1, 0].hist(fidelities, bins=2, edgecolor='black')
+        axes[1, 0].set_xlabel('Fidelity')
+        axes[1, 0].set_ylabel('Count')
+        axes[1, 0].set_title('Fidelity Distribution')
+        axes[1, 0].grid(True, alpha=0.3)
+    
+    # 4. EI history
+    if 'ei_history' in result:
+        axes[1, 1].plot(result['ei_history'])
+        axes[1, 1].set_xlabel('Iteration')
+        axes[1, 1].set_ylabel('Expected Improvement')
+        axes[1, 1].set_title('Acquisition Function Value')
+        axes[1, 1].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show() 
