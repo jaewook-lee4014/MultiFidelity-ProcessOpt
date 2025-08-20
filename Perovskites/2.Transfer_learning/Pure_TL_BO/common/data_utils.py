@@ -208,13 +208,19 @@ def create_all_combinations_data(param_ranges: List[range], lookup: Dict,
         for j, cation in enumerate(cation_options, 1):
             for k, anion in enumerate(anion_options, 1):
                 try:
-                    bandgap = np.amin(
+                    bandgap_hse06 = np.amin(
                         lookup[organic.capitalize()][cation][anion]['bandgap_hse06']
+                    )
+                    # GGA 밴드갭도 추가
+                    bandgap_gga = np.amin(
+                        lookup[organic.capitalize()][cation][anion]['bandgap_gga']
                     )
                     combo_label = f"{i},{j},{k}"
                     all_results.append({
                         'combo': combo_label,
-                        'bandgap_hse06': bandgap
+                        'bandgap_hse06': bandgap_hse06,
+                        'bandgap_gga': bandgap_gga,
+                        'bandgap': bandgap_hse06  # 기존 호환성을 위해 유지
                     })
                 except Exception as e:
                     print(f"Skip: {organic}-{cation}-{anion} ({e})")

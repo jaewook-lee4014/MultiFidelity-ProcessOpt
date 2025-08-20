@@ -157,21 +157,27 @@ def recommend_next(model: TransferLearningDNN, blr: BayesianLinearRegression,
     # Expected Improvement 계산
     ei = expected_improvement(y_pred, y_std, y_best)
     
-    # 이미 측정된 점들은 제외
+    # 이미 측정된 점들을 fidelity별로 구분하여 저장
     measured_points = set()
     for x in X_low:
-        measured_points.add(tuple(x.astype(int)))
+        measured_points.add((tuple(x.astype(int)), 'low'))
     for x in X_high:
-        measured_points.add(tuple(x.astype(int)))
+        measured_points.add((tuple(x.astype(int)), 'high'))
     
-    # 측정되지 않은 점들만 고려
+    # 현재 요청되는 fidelity 결정
+    current_fidelity = 'high' if s == 1.0 else 'low'
+    
+    # 유효한 후보 필터링: 같은 fidelity로 이미 측정된 점만 제외
     valid_indices = []
     for i, combo in enumerate(X_grid):
-        if tuple(combo.astype(int)) not in measured_points:
+        combo_tuple = tuple(combo.astype(int))
+        # 현재 fidelity로 이미 측정되었는지 확인
+        if (combo_tuple, current_fidelity) not in measured_points:
             valid_indices.append(i)
     
     if not valid_indices:
-        # 모든 점이 측정된 경우 (이론적으로 발생하지 않아야 함)
+        # 현재 fidelity로 모든 점이 측정된 경우
+        # (이론적으로 발생하지 않아야 하지만) 최대 EI 선택
         best_idx = np.argmax(ei)
     else:
         # 유효한 점들 중에서 최대 EI 선택
