@@ -115,7 +115,7 @@ class TransferLearningDNN:
             X_train, y_train, X_val, y_val = self._split_validation_data(X_low, y_low)
             
             # BO 실행
-            from hyperparameter_optimization import optimize_dnn_hyperparameters
+            from .hyperparameter_optimization import optimize_dnn_hyperparameters
             best_params, best_performance, history = optimize_dnn_hyperparameters(
                 X_train, y_train, X_val, y_val, 
                 input_dim=self.input_dim,
@@ -198,7 +198,7 @@ class TransferLearningDNN:
             X_train_features = self.extract_features(X_train)
             X_val_features = self.extract_features(X_val)
             
-            from hyperparameter_optimization import optimize_dnn_hyperparameters
+            from .hyperparameter_optimization import optimize_dnn_hyperparameters
             best_params, best_performance, history = optimize_dnn_hyperparameters(
                 X_train_features, y_train, X_val_features, y_val,
                 input_dim=feature_dim,

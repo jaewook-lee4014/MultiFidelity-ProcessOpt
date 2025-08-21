@@ -3,7 +3,7 @@ import itertools
 import time
 from scipy.stats import norm
 from typing import List, Tuple, Dict, Optional
-from models import TransferLearningDNN, BayesianLinearRegression
+from .models import TransferLearningDNN, BayesianLinearRegression
 
 
 def expected_improvement(mu: np.ndarray, sigma: np.ndarray, y_best: float, xi: float = 0.01) -> np.ndarray:
@@ -220,7 +220,7 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
     Returns:
         결과 딕셔너리 (비용, best_so_far 곡선, 시간 등)
     """
-    from data_utils import (
+    from common.data_utils import (
         sample_param_space, assign_fidelities, prepare_initial_data,
         measure_from_label, append_measurement_to_data
     )
@@ -258,6 +258,7 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
     cost_data = []
     iter_ = 0
     hyperparameter_history = []  # 하이퍼파라미터 기록
+    visualization_data = []  # 시각화용 데이터
     
     # 초기 best_so_far 설정
     if len(y_high) > 0:
@@ -316,6 +317,61 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
             model, blr, param_ranges, X_low, X_high, y_low, y_high, s
         )
         
+        # 실제값 수집 (X_grid의 각 점에 대한 실제 bandgap 값)
+        def get_actual_bandgap(label_arr, lookup, label_maps, fidelity=1.0):
+            """조합 라벨로부터 실제 bandgap 값 가져오기"""
+            # 라벨 역변환
+            reverse_maps = {
+                "organic": {v: k for k, v in label_maps["organic"].items()},
+                "cation": {v: k for k, v in label_maps["cation"].items()},
+                "anion": {v: k for k, v in label_maps["anion"].items()},
+            }
+            
+            try:
+                organic = reverse_maps["organic"][int(label_arr[0])]
+                cation = reverse_maps["cation"][int(label_arr[1])]
+                anion = reverse_maps["anion"][int(label_arr[2])]
+                
+                # High-fidelity 값 사용 (HSE06)
+                if fidelity == 1.0:
+                    return np.amin(lookup[organic.capitalize()][cation][anion]['bandgap_hse06'])
+                else:
+                    return np.amin(lookup[organic.capitalize()][cation][anion]['bandgap_gga'])
+            except (KeyError, IndexError):
+                return np.nan
+        
+        y_actual = np.array([get_actual_bandgap(combo, lookup, label_maps, fidelity=1.0) 
+                            for combo in X_grid])
+        
+        # 시각화용 데이터 저장
+        viz_entry = {
+            'iteration': iter_,
+            'y_pred': y_pred.copy(),
+            'y_std': y_std.copy(),
+            'y_actual': y_actual.copy(),  # 실제값 추가
+            'ei': ei.copy(),
+            'best_idx': best_idx,
+            'X_grid': X_grid.copy(),
+            'fidelity': s,
+            'recommended_point': next_x_label.copy(),
+            'model': model,
+            'blr': blr,
+            'X_low': X_low.copy(),
+            'y_low': y_low.copy(),
+            'X_high': X_high.copy(),
+            'y_high': y_high.copy()
+        }
+        
+        # 하이퍼파라미터 정보 추가 (베이지안 최적화 사용 시)
+        if use_hyperparameter_bo:
+            hp_summary = model.get_hyperparameter_summary()
+            viz_entry['hyperparameters'] = {
+                'pretrain_params': hp_summary['pretrain_best_params'],
+                'finetune_params': hp_summary['finetune_best_params']
+            }
+        
+        visualization_data.append(viz_entry)
+        
         # 측정
         measurement = measure_from_label(next_x_label, s, label_maps, lookup)
         
@@ -323,6 +379,43 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
             print(f"Recommended: {next_x_label} (fidelity: {s})")
             print(f"Measurement: {measurement:.4f}")
             print(f"Max EI: {ei[best_idx]:.6f}")
+            
+            # 베이지안 모델 성능 지표 출력
+            if len(X_high) > 0:  # High-fidelity 데이터가 있을 때만
+                # High-fidelity 훈련 데이터에 대한 예측값 계산
+                features_high = model.extract_features(X_high)
+                y_pred_high = []
+                for phi in features_high:
+                    mu, _ = blr.predict(phi)
+                    y_pred_high.append(mu)
+                y_pred_high = np.array(y_pred_high)
+                
+                # 성능 지표 계산
+                from sklearn.metrics import mean_squared_error, r2_score
+                mse = mean_squared_error(y_high, y_pred_high)
+                rmse = np.sqrt(mse)
+                r2 = r2_score(y_high, y_pred_high)
+                
+                print(f"🔧 Bayesian Model Performance (High-fidelity data):")
+                print(f"   MSE: {mse:.4f}, RMSE: {rmse:.4f}, R²: {r2:.4f}")
+            
+            if len(X_low) > 0:  # Low-fidelity 데이터가 있을 때
+                # Low-fidelity 훈련 데이터에 대한 예측값 계산
+                features_low = model.extract_features(X_low)
+                y_pred_low = []
+                for phi in features_low:
+                    mu, _ = blr.predict(phi)
+                    y_pred_low.append(mu)
+                y_pred_low = np.array(y_pred_low)
+                
+                # 성능 지표 계산
+                from sklearn.metrics import mean_squared_error, r2_score
+                mse_low = mean_squared_error(y_low, y_pred_low)
+                rmse_low = np.sqrt(mse_low)
+                r2_low = r2_score(y_low, y_pred_low)
+                
+                print(f"🔧 Bayesian Model Performance (Low-fidelity data):")
+                print(f"   MSE: {mse_low:.4f}, RMSE: {rmse_low:.4f}, R²: {r2_low:.4f}")
         
         # 데이터 업데이트
         X_low, y_low, X_high, y_high = append_measurement_to_data(
@@ -353,6 +446,12 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
                 print('Found the minimum target value!')
             break
     
+    # 결과 호환성을 위한 데이터 변환
+    best_values_history = [x[3] for x in best_so_far_curve]
+    cost_history = [x[2] for x in cost_data]
+    fidelity_history = [data['fidelity'] for data in visualization_data]
+    ei_history = [data['ei'][data['best_idx']] for data in visualization_data]
+    
     return {
         'total_cost': total_cost,
         'best_so_far': best_so_far,
@@ -365,7 +464,13 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
         'final_X_high': X_high,
         'final_y_high': y_high,
         'hyperparameter_history': hyperparameter_history,
-        'use_hyperparameter_bo': use_hyperparameter_bo
+        'use_hyperparameter_bo': use_hyperparameter_bo,
+        'visualization_data': visualization_data,
+        'best_values_history': best_values_history,
+        'cost_history': cost_history,
+        'fidelity_history': fidelity_history,
+        'ei_history': ei_history,
+        'model_type': 'DNGO'
     }
 
 
@@ -375,7 +480,8 @@ def multiple_optimization_runs(param_space: Dict, label_maps: Dict, lookup: Dict
                               min_target: float = 1.5249, model_config: Dict = None,
                               save_results: bool = True, results_filename: str = 'tl_bo_results.csv',
                               use_hyperparameter_bo: bool = False, pretrain_bo_trials: int = 0,
-                              finetune_bo_trials: int = 0, data_size: str = 'small') -> List[Dict]:
+                              finetune_bo_trials: int = 0, data_size: str = 'small',
+                              save_visualizations: bool = False, visualizations_dir: str = 'images') -> List[Dict]:
     """
     다중 최적화 실행 (하이퍼파라미터 BO 지원)
     """
@@ -410,6 +516,34 @@ def multiple_optimization_runs(param_space: Dict, label_maps: Dict, lookup: Dict
         
         all_results.append(result)
         all_costs.append(result['total_cost'])
+        
+        # 각 실행에 대한 시각화 저장
+        if save_visualizations and 'visualization_data' in result:
+            import os
+            from datetime import datetime
+            from .visualization import plot_optimization_progress
+            
+            # 각 실행별 디렉토리 생성
+            timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
+            run_dir = os.path.join(visualizations_dir, f"dngo_{timestamp}_run{run+1:02d}")
+            
+            if not os.path.exists(run_dir):
+                os.makedirs(run_dir, exist_ok=True)
+            
+            print(f"  📸 Saving visualizations to {run_dir}/")
+            plot_optimization_progress(result, save_dir=run_dir)
+            print(f"  ✅ Visualization saved for run {run+1}")
+            
+            # 베이지안 최적화 결과 저장
+            try:
+                from ..common.result_saver import save_optimization_results
+                save_optimization_results(result, run_dir, 'dngo')
+            except ImportError:
+                # 상대 import 실패 시 절대 import 시도
+                import sys
+                sys.path.append('..')
+                from common.result_saver import save_optimization_results
+                save_optimization_results(result, run_dir, 'dngo')
         
         if result['best_so_far'] <= min_target:
             print(f"Run {run+1}: Found target! Cost: {result['total_cost']:.2f}")

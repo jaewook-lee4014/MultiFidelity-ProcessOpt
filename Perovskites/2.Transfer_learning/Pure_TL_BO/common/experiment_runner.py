@@ -205,7 +205,15 @@ model_registry = ModelRegistry()
 
 def register_default_models():
     """기본 모델들 등록"""
-    from models import TransferLearningDNN, TransferLearningDNNWithHyperOpt
+    try:
+        from DNGO.models import TransferLearningDNN
+    except ImportError:
+        from models import TransferLearningDNN
+    
+    try:
+        from models import TransferLearningDNNWithHyperOpt
+    except ImportError:
+        TransferLearningDNNWithHyperOpt = None
     
     # Transfer Learning DNN
     model_registry.register(
@@ -221,15 +229,16 @@ def register_default_models():
     )
     
     # Transfer Learning DNN with Hyperparameter Optimization
-    model_registry.register(
-        'tl_dnn_hyperopt',
-        TransferLearningDNNWithHyperOpt,
-        {
-            'input_dim': 3,
-            'output_dim': 1,
-            'use_hyperparameter_bo': True
-        }
-    )
+    if TransferLearningDNNWithHyperOpt is not None:
+        model_registry.register(
+            'tl_dnn_hyperopt',
+            TransferLearningDNNWithHyperOpt,
+            {
+                'input_dim': 3,
+                'output_dim': 1,
+                'use_hyperparameter_bo': True
+            }
+        )
     
     # 추가 모델들을 여기에 등록
     # model_registry.register('gp', GaussianProcessModel, {...})

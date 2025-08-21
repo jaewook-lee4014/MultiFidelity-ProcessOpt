@@ -8,12 +8,12 @@ from .optimization_bnn import (
     multiple_optimization_runs_bnn,
     train_dual_bnn_models
 )
-from .hyperparameter_optimization_bnn import optimize_hyperparameters_bnn
+# from .hyperparameter_optimization_bnn import optimize_hyperparameters_bnn  # 함수 없음
 
 __all__ = [
     'TransferLearningBNN',
     'single_optimization_run_bnn',
     'multiple_optimization_runs_bnn',
     'train_dual_bnn_models',
-    'optimize_hyperparameters_bnn'
+    # 'optimize_hyperparameters_bnn'
 ]

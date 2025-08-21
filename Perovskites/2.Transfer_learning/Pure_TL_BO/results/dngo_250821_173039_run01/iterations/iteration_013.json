@@ -1,0 +1,48 @@
+{
+  "iteration": 13,
+  "recommended_point": {
+    "combination": [
+      2,
+      3,
+      4
+    ],
+    "index": 23,
+    "fidelity": 0.1,
+    "expected_improvement": 0.9560000780400436,
+    "predicted_value": 1.3610026486174127,
+    "actual_value": 2.52
+  },
+  "model_performance": {
+    "high_fidelity": {
+      "mse": 0.2176682260436027,
+      "rmse": 0.46654927504348637,
+      "r2": 0.8723331181971236,
+      "num_samples": 3
+    },
+    "low_fidelity": {
+      "mse": 0.066745367976014,
+      "rmse": 0.25835124922479863,
+      "r2": 0.8603097334569219,
+      "num_samples": 19
+    }
+  },
+  "data_info": {
+    "num_low_fidelity": 19,
+    "num_high_fidelity": 3,
+    "total_candidates": 192
+  },
+  "hyperparameters": {
+    "pretrain_params": {
+      "hidden_layers": 1,
+      "hidden_dim": 16,
+      "learning_rate": 0.0005,
+      "epochs": 125
+    },
+    "finetune_params": {
+      "hidden_layers": 3,
+      "hidden_dim": 64,
+      "learning_rate": 0.01,
+      "epochs": 29
+    }
+  }
+}

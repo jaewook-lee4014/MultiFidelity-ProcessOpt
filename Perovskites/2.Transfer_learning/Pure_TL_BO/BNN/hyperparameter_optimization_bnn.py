@@ -14,7 +14,7 @@ from scipy.optimize import minimize
 from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern
-from bnn_models import TransferLearningBNN
+from .bnn_models import TransferLearningBNN
 import time
 
 

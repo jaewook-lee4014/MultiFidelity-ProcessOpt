@@ -30,6 +30,7 @@ from common.visualization import (
     plot_multiple_runs_summary, plot_learning_curves,
     plot_optimization_results, plot_bnn_iteration_results
 )
+from DNGO.visualization import plot_optimization_progress, plot_multiple_runs_boxplot
 
 # 현재 디렉토리를 Python path에 추가
 current_dir = Path(__file__).parent
@@ -55,12 +56,10 @@ def parse_arguments():
     )
     
     # 기본 실행 옵션
-    parser.add_argument('--mode', choices=['single', 'multiple'], default='single',
-                       help='실행 모드: single run 또는 multiple runs')
     parser.add_argument('--model-type', choices=['dngo', 'bnn', 'dngo-ol'], default='dngo',
                        help='모델 타입: DNGO, BNN, 또는 DNGO-OL (Online Learning)')
-    parser.add_argument('--num-runs', type=int, default=10,
-                       help='Multiple runs 모드에서 실행 횟수')
+    parser.add_argument('--num-runs', type=int, default=1,
+                       help='실행 횟수 (1: single run, >1: multiple runs)')
     parser.add_argument('--verbose', action='store_true',
                        help='상세 출력 활성화')
     
@@ -194,10 +193,9 @@ def print_configuration(args, param_space, model_config):
     print("=" * 60)
     print("Transfer Learning Bayesian Optimization Configuration")
     print("=" * 60)
-    print(f"Mode: {args.mode}")
+    execution_mode = "Single Run" if args.num_runs == 1 else f"Multiple Runs ({args.num_runs})"
+    print(f"Execution Mode: {execution_mode}")
     print(f"Model Type: {args.model_type.upper()}")
-    if args.mode == 'multiple':
-        print(f"Number of runs: {args.num_runs}")
     
     print(f"\nOptimization Parameters:")
     print(f"  Cost budget: {args.cost_budget}")
@@ -273,7 +271,7 @@ def main():
         print(f"   Each iteration may take ~{estimated_time_per_iter} times longer.")
         print(f"   Consider using smaller trial numbers for testing.")
         
-        if args.mode == 'multiple' and args.num_runs > 5:
+        if args.num_runs > 5:
             print(f"   Multiple runs with BO may take very long time!")
             response = input("   Continue? (y/N): ")
             if response.lower() != 'y':
@@ -281,7 +279,7 @@ def main():
                 return
     
     try:
-        if args.mode == 'single':
+        if args.num_runs == 1:
             # 단일 실행
             print(f"\nStarting single optimization run...")
             
@@ -360,10 +358,24 @@ def main():
                     if last_hp.get('finetune_params'):
                         print(f"   Final BNN params: {last_hp['finetune_params']}")
             
-            # 시각화
+            # 시각화 및 결과 저장
             if args.plot_results:
                 print("Generating plots...")
-                plot_optimization_results(result)
+                if args.model_type in ['dngo', 'dngo-ol'] and 'visualization_data' in result:
+                    # DNGO 시각화 (3개 subplot 포함)
+                    from datetime import datetime
+                    timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
+                    images_dir = f"images/{args.model_type}_{timestamp}_run01"
+                    print(f"📸 Creating DNGO visualizations in {images_dir}/")
+                    plot_optimization_progress(result, save_dir=images_dir)
+                    print(f"✅ DNGO visualization completed: {images_dir}/")
+                    
+                    # 베이지안 최적화 결과 저장
+                    from common.result_saver import save_optimization_results
+                    save_optimization_results(result, images_dir, args.model_type)
+                else:
+                    # 기존 시각화 (BNN 등)
+                    plot_optimization_results(result)
                 
             # BNN + MPS 사용 시 메모리 정리
             if args.model_type == 'bnn' and model_config['device'] == 'mps':
@@ -390,7 +402,9 @@ def main():
                     use_hyperparameter_bo=args.use_hyperparameter_bo,
                     pretrain_bo_trials=args.pretrain_bo_trials,
                     finetune_bo_trials=args.finetune_bo_trials,
-                    data_size=args.data_size
+                    data_size=args.data_size,
+                    save_visualizations=args.plot_results,  # 시각화 저장 여부
+                    visualizations_dir='images'  # 시각화 저장 디렉토리
                 )
             elif args.model_type == 'dngo-ol':
                 results = multiple_optimization_runs_dngo_ol(
@@ -424,14 +438,23 @@ def main():
             # 시각화
             if args.plot_results:
                 print("Generating plots...")
-                # 다중 실행은 통계 요약만 표시
-                import pandas as pd
-                results_df = pd.DataFrame({
-                    'run': range(1, len(results) + 1),
-                    'total_cost': [r['total_cost'] for r in results],
-                    'best_so_far': [r['best_so_far'] for r in results]
-                })
-                plot_multiple_runs_summary(results_df)
+                if args.model_type in ['dngo', 'dngo-ol']:
+                    # DNGO 박스플롯 시각화
+                    from datetime import datetime
+                    timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
+                    boxplot_path = f"images/{args.model_type}_{timestamp}_boxplot_{args.num_runs}runs.png"
+                    print(f"📊 Creating DNGO boxplot: {boxplot_path}")
+                    plot_multiple_runs_boxplot(results, model_type=args.model_type.upper(), save_path=boxplot_path)
+                    print(f"✅ DNGO boxplot completed: {boxplot_path}")
+                else:
+                    # 기존 시각화 (BNN 등)
+                    import pandas as pd
+                    results_df = pd.DataFrame({
+                        'run': range(1, len(results) + 1),
+                        'total_cost': [r['total_cost'] for r in results],
+                        'best_so_far': [r['best_so_far'] for r in results]
+                    })
+                    plot_multiple_runs_summary(results_df)
                 
             # BNN + MPS 사용 시 메모리 정리
             if args.model_type == 'bnn' and model_config['device'] == 'mps':

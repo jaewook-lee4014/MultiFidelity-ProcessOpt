@@ -1,0 +1,4 @@
+run,total_cost,best_so_far,iterations,use_hyperparameter_bo
+1,5.099999999999998,1.9179,14,False
+2,5.099999999999999,1.9713,14,False
+3,5.0,1.8386,13,False

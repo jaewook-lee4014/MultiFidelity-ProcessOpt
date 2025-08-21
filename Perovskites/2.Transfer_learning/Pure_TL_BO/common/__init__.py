@@ -21,7 +21,7 @@ from .visualization import (
     plot_optimization_results,
     plot_bnn_iteration_results
 )
-from .experiment_runner import run_experiments
+# from .experiment_runner import run_experiments  # 함수가 없으므로 주석 처리
 
 __all__ = [
     'load_lookup_table',
@@ -39,5 +39,5 @@ __all__ = [
     'plot_learning_curves',
     'plot_optimization_results',
     'plot_bnn_iteration_results',
-    'run_experiments'
+    # 'run_experiments'
 ]

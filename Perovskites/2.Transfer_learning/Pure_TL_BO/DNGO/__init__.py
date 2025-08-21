@@ -12,7 +12,7 @@ from .optimization_base import (
     single_optimization_run,
     multiple_optimization_runs
 )
-from .hyperparameter_optimization import optimize_hyperparameters
+from .hyperparameter_optimization import optimize_dnn_hyperparameters
 
 __all__ = [
     'TransferLearningDNN',
@@ -22,5 +22,5 @@ __all__ = [
     'OnlineBayesianLinearRegression',
     'single_optimization_run',
     'multiple_optimization_runs',
-    'optimize_hyperparameters'
+    'optimize_dnn_hyperparameters'
 ]
