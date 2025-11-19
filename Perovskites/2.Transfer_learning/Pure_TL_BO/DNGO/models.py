@@ -27,6 +27,12 @@ class TransferLearningDNN:
         self.finetune_best_params = None
         self.pretrain_bo_history = []
         self.finetune_bo_history = []
+        
+        # Incremental learning 관련 변수
+        self.incremental_params = None  # BO로 설정될 파라미터
+        self.data_buffer = {'X_low': [], 'y_low': [], 'X_high': [], 'y_high': []}
+        self.update_counter = 0
+        self.last_learning_rates = {'pretrain': 1e-3, 'finetune': 1e-4}
 
         # 기본 모델 구조 (BO 사용하지 않을 때)
         if not use_hyperparameter_bo:
@@ -103,20 +109,17 @@ class TransferLearningDNN:
         X_low = np.asarray(X_low, dtype=np.float32)
         y_low = np.asarray(y_low, dtype=np.float32).flatten()
         
-        if verbose:
-            print(f"Pretrain with {len(X_low)} low-fidelity samples")
-        
         if self.use_hyperparameter_bo and bo_trials is not None and bo_trials > 0:
             # 베이지안 최적화로 하이퍼파라미터 찾기
             if verbose:
-                print(f"🔍 Optimizing pretrain hyperparameters with {bo_trials} trials...")
+                print(f"    - Running Pretrain BO with {bo_trials} trials...")
             
             # 검증 데이터 분할
             X_train, y_train, X_val, y_val = self._split_validation_data(X_low, y_low)
             
-            # BO 실행
-            from .hyperparameter_optimization import optimize_dnn_hyperparameters
-            best_params, best_performance, history = optimize_dnn_hyperparameters(
+            # BO 실행 (Optuna 사용)
+            from .hyperparameter_optimization_optuna import optimize_dnn_hyperparameters_optuna
+            best_params, best_performance, history = optimize_dnn_hyperparameters_optuna(
                 X_train, y_train, X_val, y_val, 
                 input_dim=self.input_dim,
                 n_trials=bo_trials,
@@ -127,10 +130,6 @@ class TransferLearningDNN:
             
             self.pretrain_best_params = best_params
             self.pretrain_bo_history = history
-            
-            if verbose:
-                print(f"✅ Best pretrain params: {best_params}")
-                print(f"✅ Best validation loss: {best_performance:.4f}")
             
             # 최적 하이퍼파라미터로 모델 구성
             self._build_dynamic_model(best_params)
@@ -157,8 +156,6 @@ class TransferLearningDNN:
             optimizer.step()
             self.pretrain_losses.append(loss.item())
             
-            if verbose and (epoch+1) % max(1, epochs//10) == 0:
-                print(f'[Pretrain] Epoch {epoch+1}/{epochs}: Loss {loss.item():.4f}')
 
     def finetune(self, X_high, y_high, epochs=50, lr=1e-4, verbose=False,
                  bo_trials=None, data_size='small'):
@@ -178,13 +175,10 @@ class TransferLearningDNN:
         X_high = np.asarray(X_high, dtype=np.float32)
         y_high = np.asarray(y_high, dtype=np.float32).flatten()
         
-        if verbose:
-            print(f"Finetune with {len(X_high)} high-fidelity samples")
-        
         if self.use_hyperparameter_bo and bo_trials is not None and bo_trials > 0:
             # 베이지안 최적화로 하이퍼파라미터 찾기
             if verbose:
-                print(f"🔍 Optimizing finetune hyperparameters with {bo_trials} trials...")
+                print(f"    - Running Finetune BO with {bo_trials} trials...")
             
             # 검증 데이터 분할
             X_train, y_train, X_val, y_val = self._split_validation_data(X_high, y_high)
@@ -198,8 +192,8 @@ class TransferLearningDNN:
             X_train_features = self.extract_features(X_train)
             X_val_features = self.extract_features(X_val)
             
-            from .hyperparameter_optimization import optimize_dnn_hyperparameters
-            best_params, best_performance, history = optimize_dnn_hyperparameters(
+            from .hyperparameter_optimization_optuna import optimize_dnn_hyperparameters_optuna
+            best_params, best_performance, history = optimize_dnn_hyperparameters_optuna(
                 X_train_features, y_train, X_val_features, y_val,
                 input_dim=feature_dim,
                 n_trials=bo_trials,
@@ -211,9 +205,6 @@ class TransferLearningDNN:
             self.finetune_best_params = best_params
             self.finetune_bo_history = history
             
-            if verbose:
-                print(f"✅ Best finetune params: {best_params}")
-                print(f"✅ Best validation loss: {best_performance:.4f}")
             
             # 최적 하이퍼파라미터로 출력층만 재구성 (feature extractor는 유지)
             self.out_layer = nn.Linear(feature_dim, 1, bias=False).to(self.device).float()
@@ -238,8 +229,6 @@ class TransferLearningDNN:
             optimizer.step()
             self.finetune_losses.append(loss.item())
             
-            if verbose and (epoch+1) % max(1, epochs//10) == 0:
-                print(f'[Finetune] Epoch {epoch+1}/{epochs}: Loss {loss.item():.4f}')
 
     def predict(self, X):
         """예측"""
@@ -257,6 +246,149 @@ class TransferLearningDNN:
             features = self.feature_net(X_tensor)
             return features.cpu().numpy()
     
+    def incremental_update(self, X_new: np.ndarray, y_new: np.ndarray, fidelity: str = 'high'):
+        """
+        점진적 업데이트 (BO로 최적화된 파라미터 사용)
+        
+        Args:
+            X_new: 새로운 입력 데이터
+            y_new: 새로운 출력 데이터  
+            fidelity: 'high' 또는 'low'
+        """
+        self.update_counter += 1
+        
+        # BO로 최적화된 파라미터 또는 기본값 사용
+        if self.incremental_params:
+            mode = self.incremental_params.get('mode', 'incremental')
+            lr_boost = self.incremental_params.get('lr_boost_factor', 2.0)
+            inc_epochs = self.incremental_params.get('incremental_epochs', 10)
+            retrain_interval = self.incremental_params.get('full_retrain_interval', 5)
+            replay_ratio = self.incremental_params.get('replay_ratio', 0.3)
+            weight_decay = self.incremental_params.get('weight_decay_factor', 0.95)
+        else:
+            # 기본값
+            mode = 'incremental'
+            lr_boost = 2.0
+            inc_epochs = 10
+            retrain_interval = 5
+            replay_ratio = 0.3
+            weight_decay = 0.95
+        
+        # 모드에 따른 업데이트 전략
+        if mode == 'full':
+            # 항상 전체 재학습
+            self._full_retrain(X_new, y_new, fidelity)
+        elif mode == 'hybrid' and self.update_counter % retrain_interval == 0:
+            # 주기적 전체 재학습
+            self._full_retrain(X_new, y_new, fidelity)
+        else:
+            # 점진적 업데이트
+            self._incremental_train(X_new, y_new, fidelity, lr_boost, inc_epochs, 
+                                  replay_ratio, weight_decay)
+        
+        # 데이터 버퍼 업데이트
+        self._update_buffer(X_new, y_new, fidelity)
+    
+    def _full_retrain(self, X_new: np.ndarray, y_new: np.ndarray, fidelity: str):
+        """전체 재학습"""
+        if fidelity == 'high':
+            self.finetune(X_new, y_new, 
+                         epochs=self.finetune_best_params.get('epochs', 50) if self.finetune_best_params else 50,
+                         lr=self.finetune_best_params.get('learning_rate', 1e-4) if self.finetune_best_params else 1e-4)
+        else:
+            self.pretrain(X_new, y_new,
+                         epochs=self.pretrain_best_params.get('epochs', 50) if self.pretrain_best_params else 50, 
+                         lr=self.pretrain_best_params.get('learning_rate', 1e-3) if self.pretrain_best_params else 1e-3)
+    
+    def _incremental_train(self, X_new: np.ndarray, y_new: np.ndarray, fidelity: str,
+                          lr_boost: float, inc_epochs: int, replay_ratio: float, weight_decay: float):
+        """점진적 학습"""
+        if not hasattr(self, 'model') or self.model is None:
+            # 모델이 없으면 전체 학습
+            self._full_retrain(X_new, y_new, fidelity)
+            return
+        
+        # 기본 학습률에 부스트 적용
+        base_lr = self.last_learning_rates.get('finetune' if fidelity == 'high' else 'pretrain', 1e-4)
+        boosted_lr = base_lr * lr_boost
+        
+        # Experience Replay: 이전 데이터 일부 재사용
+        X_combined, y_combined, sample_weights = self._prepare_replay_data(
+            X_new, y_new, fidelity, replay_ratio, weight_decay
+        )
+        
+        # 점진적 학습
+        optimizer = optim.Adam(self.model.parameters(), lr=boosted_lr)
+        loss_fn = nn.MSELoss(reduction='none')  # 가중치 적용을 위해
+        
+        X_tensor = torch.tensor(X_combined, dtype=torch.float32).to(self.device)
+        y_tensor = torch.tensor(y_combined, dtype=torch.float32).view(-1, 1).to(self.device)
+        weights_tensor = torch.tensor(sample_weights, dtype=torch.float32).to(self.device)
+        
+        self.model.train()
+        for epoch in range(inc_epochs):
+            optimizer.zero_grad()
+            pred = self.model(X_tensor)
+            losses = loss_fn(pred, y_tensor).squeeze()
+            weighted_loss = (losses * weights_tensor).mean()
+            weighted_loss.backward()
+            
+            # Gradient clipping (안정성)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+            optimizer.step()
+        
+        # 학습률 기록
+        self.last_learning_rates[fidelity] = boosted_lr
+    
+    def _prepare_replay_data(self, X_new: np.ndarray, y_new: np.ndarray, fidelity: str,
+                            replay_ratio: float, weight_decay: float):
+        """Experience Replay를 위한 데이터 준비"""
+        buffer_key_x = f'X_{fidelity}'
+        buffer_key_y = f'y_{fidelity}'
+        
+        # 새 데이터
+        X_combined = X_new.copy()
+        y_combined = y_new.copy()
+        sample_weights = np.ones(len(X_new))  # 새 데이터는 가중치 1.0
+        
+        # 이전 데이터 재사용
+        if len(self.data_buffer[buffer_key_x]) > 0 and replay_ratio > 0:
+            n_replay = int(len(X_new) * replay_ratio)
+            buffer_size = len(self.data_buffer[buffer_key_x])
+            n_replay = min(n_replay, buffer_size)
+            
+            if n_replay > 0:
+                # 랜덤 샘플링
+                indices = np.random.choice(buffer_size, n_replay, replace=False)
+                X_replay = np.array([self.data_buffer[buffer_key_x][i] for i in indices])
+                y_replay = np.array([self.data_buffer[buffer_key_y][i] for i in indices])
+                
+                # 이전 데이터는 감소된 가중치
+                replay_weights = np.full(n_replay, weight_decay)
+                
+                # 결합
+                X_combined = np.vstack([X_combined, X_replay])
+                y_combined = np.concatenate([y_combined, y_replay])
+                sample_weights = np.concatenate([sample_weights, replay_weights])
+        
+        return X_combined, y_combined, sample_weights
+    
+    def _update_buffer(self, X_new: np.ndarray, y_new: np.ndarray, fidelity: str, max_buffer_size: int = 100):
+        """데이터 버퍼 업데이트"""
+        buffer_key_x = f'X_{fidelity}'
+        buffer_key_y = f'y_{fidelity}'
+        
+        # 새 데이터 추가
+        for x, y in zip(X_new, y_new):
+            self.data_buffer[buffer_key_x].append(x)
+            self.data_buffer[buffer_key_y].append(y)
+        
+        # 버퍼 크기 제한 (FIFO)
+        if len(self.data_buffer[buffer_key_x]) > max_buffer_size:
+            excess = len(self.data_buffer[buffer_key_x]) - max_buffer_size
+            self.data_buffer[buffer_key_x] = self.data_buffer[buffer_key_x][excess:]
+            self.data_buffer[buffer_key_y] = self.data_buffer[buffer_key_y][excess:]
+    
     def get_hyperparameter_summary(self) -> Dict:
         """하이퍼파라미터 최적화 결과 요약"""
         summary = {
@@ -264,7 +396,9 @@ class TransferLearningDNN:
             'pretrain_best_params': self.pretrain_best_params,
             'finetune_best_params': self.finetune_best_params,
             'pretrain_trials': len(self.pretrain_bo_history),
-            'finetune_trials': len(self.finetune_bo_history)
+            'finetune_trials': len(self.finetune_bo_history),
+            'pretrain_bo_history': self.pretrain_bo_history,  # 모든 시행 기록
+            'finetune_bo_history': self.finetune_bo_history   # 모든 시행 기록
         }
         return summary
 
@@ -355,3 +489,49 @@ class BayesianLinearRegression:
             variances.append(var)
         
         return np.array(means), np.array(variances) 
+    
+    def incremental_update(self, X_new: np.ndarray, y_new: np.ndarray, weight: float = 1.0):
+        """
+        Sherman-Morrison-Woodbury formula를 사용한 효율적 점진적 업데이트
+        
+        Args:
+            X_new: 새로운 입력 특성 행렬 (N x D)
+            y_new: 새로운 타겟 값 (N,)
+            weight: 새 데이터의 가중치 (기본값 1.0)
+        """
+        X_new = np.asarray(X_new, dtype=np.float32)
+        y_new = np.asarray(y_new, dtype=np.float32).flatten()
+        
+        if not self.fitted:
+            # 첫 업데이트면 일반 fit 사용
+            self.fit(X_new, y_new)
+            return
+        
+        # 편향 항 추가
+        X_new_bias = np.column_stack([np.ones(len(X_new)), X_new])
+        
+        # 가중치 적용
+        if weight != 1.0:
+            beta_weighted = self.beta * weight
+        else:
+            beta_weighted = self.beta
+        
+        # Sherman-Morrison-Woodbury 공식으로 효율적 업데이트
+        # 여러 점을 한번에 업데이트
+        for i, (x_new, y_val) in enumerate(zip(X_new_bias, y_new)):
+            x_new = x_new.reshape(-1, 1)
+            
+            # 공분산 행렬 업데이트: S_new = S_old - (S_old * x * x^T * S_old) / (1/beta + x^T * S_old * x)
+            Sx = self.cov @ x_new
+            denominator = 1.0 / beta_weighted + x_new.T @ Sx
+            self.cov = self.cov - (Sx @ Sx.T) / denominator
+            
+            # 평균 업데이트: m_new = m_old + beta * S_new * x * (y - x^T * m_old)
+            prediction_error = y_val - x_new.T @ self.mean
+            self.mean = self.mean + beta_weighted * self.cov @ x_new.flatten() * prediction_error
+    
+    def reset_to_prior(self):
+        """사전분포로 리셋"""
+        self.mean = None
+        self.cov = None
+        self.fitted = False

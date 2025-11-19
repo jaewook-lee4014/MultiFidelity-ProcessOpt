@@ -16,6 +16,12 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern
 from .models import TransferLearningDNN
 import time
+from tqdm import tqdm
+import warnings
+
+# GP 최적화 경고 숨기기
+warnings.filterwarnings("ignore", "The optimal value found for dimension")
+warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 
 
 class HyperparameterSpace:
@@ -162,13 +168,17 @@ class HyperparameterBO:
         self.y_observed = []  # 성능 (음수로 저장, 최소화 문제로 변환)
         self.param_history = []  # 실제 하이퍼파라미터 기록
         
-        # GP 모델
-        kernel = Matern(length_scale=0.5, nu=2.5)
+        # GP 모델 - length_scale 범위를 넓게 설정하여 경고 방지
+        kernel = Matern(
+            length_scale=0.5, 
+            length_scale_bounds=(1e-3, 1e3),  # 더 넓은 범위로 설정
+            nu=2.5
+        )
         self.gp = GaussianProcessRegressor(
             kernel=kernel,
-            alpha=1e-6,
+            alpha=1e-4,  # 노이즈를 조금 더 허용
             normalize_y=True,
-            n_restarts_optimizer=5,
+            n_restarts_optimizer=3,  # 최적화 시간 단축
             random_state=42
         )
     
@@ -203,9 +213,6 @@ class HyperparameterBO:
                 loss = loss_fn(pred, y_train_tensor)
                 loss.backward()
                 optimizer.step()
-                
-                if verbose and (epoch + 1) % max(1, params['epochs'] // 5) == 0:
-                    print(f"  Epoch {epoch+1}/{params['epochs']}: Loss {loss.item():.4f}")
             
             # 검증 성능 평가
             model.eval()
@@ -276,13 +283,8 @@ class HyperparameterBO:
         if len(self.X_observed) < self.n_initial:
             # 초기 랜덤 샘플링
             params = self.param_space.sample_random()
-            if verbose:
-                print(f"Initial random sampling: {params}")
         else:
             # GP 기반 제안
-            if verbose:
-                print("GP-based suggestion...")
-            
             # GP 학습
             X_array = np.array(self.X_observed)
             y_array = np.array(self.y_observed)
@@ -291,27 +293,21 @@ class HyperparameterBO:
             # 다음 포인트 제안
             x_next = self._optimize_acquisition()
             params = self.param_space.denormalize_params(x_next)
-            
-            if verbose:
-                print(f"GP-suggested params: {params}")
         
         # 성능 평가
-        if verbose:
-            print("Evaluating hyperparameters...")
-        
         performance = self._evaluate_hyperparameters(
-            params, X_train, y_train, X_val, y_val, input_dim, device, verbose
+            params, X_train, y_train, X_val, y_val, input_dim, device, verbose=False
         )
         
         # 결과 기록
         normalized_params = self.param_space.normalize_params(params)
         self.X_observed.append(normalized_params)
         self.y_observed.append(performance)  # 최소화 문제
-        self.param_history.append(params.copy())
         
-        if verbose:
-            print(f"Performance (validation loss): {performance:.4f}")
-            print(f"Best so far: {np.min(self.y_observed):.4f}")
+        # 파라미터와 성능을 함께 기록
+        trial_record = params.copy()
+        trial_record['validation_loss'] = performance
+        self.param_history.append(trial_record)
         
         return params, performance
     
@@ -321,7 +317,11 @@ class HyperparameterBO:
             return self.param_space.sample_random(), float('inf')
         
         best_idx = np.argmin(self.y_observed)
-        return self.param_history[best_idx], self.y_observed[best_idx]
+        best_params = self.param_history[best_idx].copy()
+        # validation_loss 제거하여 순수 파라미터만 반환
+        if 'validation_loss' in best_params:
+            del best_params['validation_loss']
+        return best_params, self.y_observed[best_idx]
 
 
 def optimize_dnn_hyperparameters(X_train: np.ndarray, y_train: np.ndarray,
@@ -346,31 +346,28 @@ def optimize_dnn_hyperparameters(X_train: np.ndarray, y_train: np.ndarray,
     Returns:
         최적 하이퍼파라미터, 최적 성능, 전체 기록
     """
-    print(f"Starting hyperparameter optimization with {n_trials} trials...")
-    
     # 하이퍼파라미터 공간 및 BO 초기화
     param_space = HyperparameterSpace(data_size)
     bo = HyperparameterBO(param_space, n_initial=min(3, n_trials))
     
-    # 베이지안 최적화 실행
-    for trial in range(n_trials):
-        print(f"\n--- Trial {trial + 1}/{n_trials} ---")
-        start_time = time.time()
-        
-        params, performance = bo.suggest_hyperparameters(
-            X_train, y_train, X_val, y_val, input_dim, device, verbose
-        )
-        
-        elapsed = time.time() - start_time
-        print(f"Trial {trial + 1} completed in {elapsed:.2f}s")
-        print(f"Params: {params}")
-        print(f"Performance: {performance:.4f}")
+    # 베이지안 최적화 실행 with progress bar
+    with tqdm(total=n_trials, desc="      HP-BO Progress", disable=not verbose, 
+              bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}') as pbar:
+        for trial in range(n_trials):
+            params, performance = bo.suggest_hyperparameters(
+                X_train, y_train, X_val, y_val, input_dim, device, verbose=False
+            )
+            
+            # Update progress bar with current best
+            best_so_far = np.min(bo.y_observed) if bo.y_observed else performance
+            pbar.set_postfix({'best_loss': f'{best_so_far:.4f}', 'current_loss': f'{performance:.4f}'})
+            pbar.update(1)
     
     # 최적 결과 반환
     best_params, best_performance = bo.get_best_hyperparameters()
     
-    print(f"\n=== Optimization Complete ===")
-    print(f"Best hyperparameters: {best_params}")
-    print(f"Best performance: {best_performance:.4f}")
+    if verbose:
+        print(f"      ✅ Best params: layers={best_params['hidden_layers']}, dim={best_params['hidden_dim']}, lr={best_params['learning_rate']}, epochs={best_params['epochs']}")
+        print(f"      ✅ Best loss: {best_performance:.4f}")
     
     return best_params, best_performance, bo.param_history 

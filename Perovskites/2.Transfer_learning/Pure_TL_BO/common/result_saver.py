@@ -103,9 +103,22 @@ def save_iteration_details(visualization_data: List[Dict], results_dir: str):
             }
         }
         
-        # 하이퍼파라미터 정보 추가
+        # 하이퍼파라미터 정보 추가 (최적 파라미터 및 모든 탐색 기록)
         if 'hyperparameters' in viz_data:
-            iteration_info['hyperparameters'] = viz_data['hyperparameters']
+            hp_info = viz_data['hyperparameters']
+            
+            # 최적 파라미터만 저장
+            iteration_info['hyperparameters'] = {
+                'pretrain_params': hp_info.get('pretrain_best_params'),
+                'finetune_params': hp_info.get('finetune_best_params')
+            }
+            
+            # 모든 탐색 기록도 저장
+            if hp_info.get('pretrain_bo_history'):
+                iteration_info['hyperparameter_search'] = {
+                    'pretrain_trials': hp_info.get('pretrain_bo_history', []),
+                    'finetune_trials': hp_info.get('finetune_bo_history', [])
+                }
         
         # 실제값 정보 추가 (있는 경우)
         if y_actual is not None:
@@ -123,34 +136,67 @@ def save_iteration_details(visualization_data: List[Dict], results_dir: str):
 
 
 def save_hyperparameter_history(hyperparameter_history: List[Dict], results_dir: str):
-    """하이퍼파라미터 최적화 기록 저장"""
+    """하이퍼파라미터 최적화 기록 저장 (최적 파라미터 및 모든 탐색 기록)"""
     hp_dir = os.path.join(results_dir, 'hyperparameters')
     os.makedirs(hp_dir, exist_ok=True)
     
-    # 하이퍼파라미터 기록을 DataFrame으로 변환하여 CSV로 저장
-    hp_records = []
+    # 1. 각 iteration의 최적 파라미터만 저장 (CSV)
+    best_params_records = []
     for record in hyperparameter_history:
         flat_record = {
             'iteration': record['iteration']
         }
         
-        # Pretrain 파라미터 평탄화
+        # Pretrain 최적 파라미터
         if record.get('pretrain_params'):
             for key, value in record['pretrain_params'].items():
                 flat_record[f'pretrain_{key}'] = value
         
-        # Finetune 파라미터 평탄화
+        # Finetune 최적 파라미터
         if record.get('finetune_params'):
             for key, value in record['finetune_params'].items():
                 flat_record[f'finetune_{key}'] = value
         
-        hp_records.append(flat_record)
+        best_params_records.append(flat_record)
     
-    # CSV로 저장
-    df = pd.DataFrame(hp_records)
-    df.to_csv(os.path.join(hp_dir, 'hyperparameter_history.csv'), index=False)
+    # 최적 파라미터 CSV로 저장
+    if best_params_records:
+        df = pd.DataFrame(best_params_records)
+        df.to_csv(os.path.join(hp_dir, 'best_hyperparameters.csv'), index=False)
     
-    # JSON으로도 저장
+    # 2. 모든 탐색 기록 저장 (각 iteration별 모든 시행)
+    all_trials = []
+    for record in hyperparameter_history:
+        iteration = record['iteration']
+        
+        # Pretrain 시행들
+        if record.get('pretrain_trials'):
+            for i, trial in enumerate(record['pretrain_trials']):
+                trial_record = {
+                    'iteration': iteration,
+                    'stage': 'pretrain',
+                    'trial': i + 1,
+                }
+                trial_record.update(trial)
+                all_trials.append(trial_record)
+        
+        # Finetune 시행들
+        if record.get('finetune_trials'):
+            for i, trial in enumerate(record['finetune_trials']):
+                trial_record = {
+                    'iteration': iteration,
+                    'stage': 'finetune',
+                    'trial': i + 1,
+                }
+                trial_record.update(trial)
+                all_trials.append(trial_record)
+    
+    # 모든 시행 CSV로 저장
+    if all_trials:
+        df_trials = pd.DataFrame(all_trials)
+        df_trials.to_csv(os.path.join(hp_dir, 'all_hyperparameter_trials.csv'), index=False)
+    
+    # 3. 전체 정보 JSON으로도 저장
     with open(os.path.join(hp_dir, 'hyperparameter_history.json'), 'w') as f:
         json.dump(convert_numpy_to_list(hyperparameter_history), f, indent=2, ensure_ascii=False)
 

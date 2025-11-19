@@ -65,3 +65,19 @@ logs/
 *.pkl.gz
 *.h5
 *.hdf5
+
+# Results directories
+results/
+**/results/
+
+# Experiment output files
+tl_bo_results*.csv
+
+# Node.js
+node_modules/
+*.tar.xz
+*.tar.gz
+
+# Animation and visualization outputs
+animations/
+plots/

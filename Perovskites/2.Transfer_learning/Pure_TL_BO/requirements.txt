@@ -12,8 +12,12 @@ torchvision>=0.10.0
 matplotlib>=3.4.0
 seaborn>=0.11.0
 
+# Progress tracking
+tqdm>=4.62.0
+
 # Bayesian optimization and Gaussian processes
 scikit-optimize>=0.9.0
+optuna>=3.0.0
 
 # Optional: GPU support (uncomment if needed)
 # torch-gpu>=1.9.0

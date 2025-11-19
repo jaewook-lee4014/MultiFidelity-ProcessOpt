@@ -176,9 +176,10 @@ def plot_step_visualization(viz_data: Dict, save_path: Optional[str] = None,
     
     # Subplot 1: Low-fidelity 예측 vs 실제값 (상단 왼쪽)
     ax1 = fig.add_subplot(gs[0, 0])
-    if len(viz_data['X_low']) > 0:
+    blr_low = viz_data.get('blr_low', viz_data.get('blr'))  # LOFI 전용 모델 사용
+    if len(viz_data['X_low']) > 0 and blr_low is not None:
         plot_prediction_vs_actual(
-            viz_data['model'], viz_data['blr'],
+            viz_data['model'], blr_low,
             viz_data['X_grid'], viz_data['X_low'], viz_data['y_low'],
             title=f"Low-fidelity Model (n={len(viz_data['y_low'])})",
             ax=ax1,
@@ -191,9 +192,10 @@ def plot_step_visualization(viz_data: Dict, save_path: Optional[str] = None,
     
     # Subplot 2: High-fidelity 예측 vs 실제값 (상단 오른쪽)
     ax2 = fig.add_subplot(gs[0, 1])
-    if len(viz_data['X_high']) > 0:
+    blr_high = viz_data.get('blr_high', viz_data.get('blr'))  # HIFI 전용 모델 사용
+    if len(viz_data['X_high']) > 0 and blr_high is not None:
         plot_prediction_vs_actual(
-            viz_data['model'], viz_data['blr'],
+            viz_data['model'], blr_high,
             viz_data['X_grid'], viz_data['X_high'], viz_data['y_high'],
             title=f"High-fidelity Model (n={len(viz_data['y_high'])})",
             ax=ax2,
@@ -523,6 +525,11 @@ def plot_multiple_runs_boxplot(all_results: List[Dict], model_type: str = 'DNGO'
     ax.set_title(f'{model_type} Performance over {len(all_results)} Runs', 
                 fontsize=14, fontweight='bold')
     ax.set_xticklabels([model_type])
+    
+    # y축 범위를 0-50으로 고정, 10 간격
+    ax.set_ylim(0, 50)
+    ax.set_yticks(np.arange(0, 51, 10))  # 0, 10, 20, 30, 40, 50
+    
     ax.grid(True, alpha=0.3)
     
     # 통계 정보를 범례로 추가

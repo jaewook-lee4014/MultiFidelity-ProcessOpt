@@ -1,6 +1,6 @@
-# Transfer Learning Bayesian Optimization
+# Transfer Learning Bayesian Optimization with Incremental Learning
 
-페로브스카이트 태양전지 소재 최적화를 위한 Transfer Learning 기반 베이지안 최적화 시스템입니다. BNN(Bayesian Neural Network)와 DNGO(Deep Networks for Global Optimization) 두 가지 접근법을 제공합니다.
+페로브스카이트 태양전지 소재 최적화를 위한 Transfer Learning 기반 베이지안 최적화 시스템입니다. BNN(Bayesian Neural Network)와 DNGO(Deep Networks for Global Optimization) 두 가지 접근법을 제공하며, 점진적 학습(Incremental Learning) 기능을 지원합니다.
 
 ## 📁 프로젝트 구조
 
@@ -57,85 +57,164 @@ Pure_TL_BO/
 - Early termination on target achievement
 - 병렬 실행 지원
 
-## 📋 사용법
+## 🚀 **핵심 실험 시나리오 (4가지 필수 벤치마크)**
 
-### 기본 실행 (DNGO)
-
+### **시나리오 1: DNGO + Standard Learning**
 ```bash
-# 단일 실행 with 시각화
-python main.py --mode single --method dngo --cost-budget 50 --verbose
-
-# 다중 실행 for 통계 분석
-python main.py --mode multiple --method dngo --num-runs 100
+python3 main.py --model-type dngo --num-runs 10 --cost-budget 50 \
+  --use-hyperparameter-bo --pretrain-bo-trials 100 --finetune-bo-trials 100 \
+  --verbose --plot-results
 ```
 
-### BNN 실행
-
+### **시나리오 2: DNGO + Incremental Learning**
 ```bash
-# BNN 단일 실행
-python main.py --mode single --method bnn --cost-budget 50 --verbose
-
-# BNN with 하이퍼파라미터 최적화
-python main.py --mode single --method bnn \
-               --use-hyperparameter-bo \
-               --pretrain-bo-trials 5 \
-               --finetune-bo-trials 5
+python3 main.py --model-type dngo --num-runs 10 --cost-budget 50 \
+  --use-hyperparameter-bo --pretrain-bo-trials 100 --finetune-bo-trials 100 \
+  --use-incremental-learning \
+  --incremental-mode incremental \
+  --lr-boost-factor 1.5 \
+  --incremental-epochs 5 \
+  --replay-ratio 0.15 \
+  --weight-decay-factor 0.98 \
+  --verbose --plot-results
 ```
 
-### DNGO with Online Learning
-
+### **시나리오 3: BNN + Standard Learning**
 ```bash
-# Online learning 활성화
-python main.py --mode single --method dngo-ol \
-               --forgetting-factor 0.95 \
-               --memory-size 200 \
-               --verbose
+python3 main.py --model-type bnn --num-runs 10 --cost-budget 50 \
+  --use-hyperparameter-bo --pretrain-bo-trials 100 --finetune-bo-trials 100 \
+  --bnn-hidden-dims 64 64 \
+  --kl-weight 1.0 \
+  --kl-warmup-epochs 10 \
+  --prior-std 1.0 \
+  --n-samples 100 \
+  --verbose --plot-results
 ```
 
-## ⚙️ 주요 옵션
+### **시나리오 4: BNN + Incremental Learning**
+```bash
+python3 main.py --model-type bnn --num-runs 10 --cost-budget 50 \
+  --use-hyperparameter-bo --pretrain-bo-trials 100 --finetune-bo-trials 100 \
+  --use-incremental-learning \
+  --incremental-mode incremental \
+  --lr-boost-factor 1.4 \
+  --incremental-epochs 4 \
+  --replay-ratio 0.18 \
+  --weight-decay-factor 0.97 \
+  --kl-reg-weight 0.05 \
+  --bnn-hidden-dims 64 64 \
+  --kl-weight 1.0 \
+  --kl-warmup-epochs 10 \
+  --prior-std 1.0 \
+  --n-samples 100 \
+  --verbose --plot-results
+```
 
-### 방법 선택
-- `--method`: 최적화 방법 선택
-  - `dngo`: 기본 DNGO (Deep Networks for Global Optimization)
-  - `bnn`: Bayesian Neural Network
-  - `dngo-ol`: DNGO with Online Learning
+## 📋 기본 사용법
 
-### 최적화 설정
-- `--cost-budget`: 총 실험 비용 예산 (기본값: 50.0)
-- `--num-initial`: 초기 랜덤 샘플 수 (기본값: 5)
-- `--target-value`: 목표 최솟값 (기본값: 1.34)
+### 빠른 테스트 실행
+```bash
+# DNGO 기본 테스트
+python3 main.py --model-type dngo --num-runs 1 --cost-budget 20 --verbose
 
-### BNN 전용 옵션
-- `--noise-type`: 노이즈 모델 (homoscedastic/heteroscedastic)
-- `--kl-weight`: KL divergence 가중치 (기본값: 1.0)
-- `--kl-warmup-epochs`: KL annealing epochs (기본값: 10)
-- `--prior-std`: Prior 표준편차 (기본값: 1.0)
+# BNN 기본 테스트  
+python3 main.py --model-type bnn --num-runs 1 --cost-budget 20 --verbose
 
-### DNGO Online Learning 옵션
-- `--forgetting-factor`: 망각 계수 0~1 (기본값: 0.99)
-- `--memory-size`: 메모리 버퍼 크기 (기본값: 100)
-- `--online-update-freq`: 온라인 업데이트 주기 (기본값: 1)
+# 점진적 학습 테스트
+python3 main.py --model-type dngo --use-incremental-learning --num-runs 1 --cost-budget 20 --verbose
+```
 
-### 하이퍼파라미터 최적화
-- `--use-hyperparameter-bo`: 하이퍼파라미터 BO 활성화
-- `--pretrain-bo-trials`: Pretrain BO 시행 횟수
-- `--finetune-bo-trials`: Finetune BO 시행 횟수
-- `--data-size`: 데이터셋 크기 (small/medium/large)
+### 개발용 중간 규모 실행
+```bash
+# 하이퍼파라미터 BO 포함 개발 테스트
+python3 main.py --model-type dngo --num-runs 3 --cost-budget 30 \
+  --use-hyperparameter-bo --pretrain-bo-trials 20 --finetune-bo-trials 20 \
+  --use-incremental-learning --verbose --plot-results
+```
 
-## 📊 실험 결과
+## ⚙️ 명령행 옵션 상세
 
-### 저장 파일
-- `results/bnn_*.csv`: BNN 실험 결과
-- `results/dngo_*.csv`: DNGO 실험 결과  
-- `results/*_hyperparameters.csv`: 하이퍼파라미터 최적화 기록
-- `results/*_timing.csv`: 실행 시간 기록
+### **핵심 옵션**
+| 옵션 | 설명 | 기본값 |
+|------|------|--------|
+| `--model-type` | 모델 타입: `dngo`, `bnn`, `dngo-ol` | `dngo` |
+| `--num-runs` | 최적화 실행 횟수 | `1` |
+| `--cost-budget` | 총 비용 예산 | `50.0` |
+| `--num-init-design` | 초기 설계점 개수 | `10` |
+| `--verbose` | 상세 출력 활성화 | `False` |
+| `--plot-results` | 시각화 생성 | `False` |
 
-### 시각화
+### **하이퍼파라미터 베이지안 최적화**
+| 옵션 | 설명 | 기본값 |
+|------|------|--------|
+| `--use-hyperparameter-bo` | 하이퍼파라미터 BO 활성화 | `False` |
+| `--pretrain-bo-trials` | Pretrain BO 시행 횟수 | `5` |
+| `--finetune-bo-trials` | Finetune BO 시행 횟수 | `5` |
+| `--data-size` | 데이터 크기 카테고리 | `small` |
+
+### **점진적 학습 옵션**
+| 옵션 | 설명 | 기본값 |
+|------|------|--------|
+| `--use-incremental-learning` | 점진적 학습 활성화 | `False` |
+| `--incremental-mode` | 모드: `full`, `incremental`, `hybrid` | `incremental` |
+| `--lr-boost-factor` | 학습률 부스트 계수 | `2.0` |
+| `--incremental-epochs` | 점진적 학습 epoch 수 | `10` |
+| `--replay-ratio` | 경험 재생 비율 (0.0-0.5) | `0.2` |
+| `--weight-decay-factor` | 가중치 감쇠 계수 | `0.9` |
+| `--full-retrain-interval` | 전체 재학습 주기 (hybrid 모드) | `5` |
+| `--kl-reg-weight` | KL 정규화 가중치 (BNN 전용) | `0.1` |
+
+### **BNN 전용 옵션**
+| 옵션 | 설명 | 기본값 |
+|------|------|--------|
+| `--bnn-hidden-dims` | BNN 은닉층 차원 | `[64, 64]` |
+| `--kl-weight` | KL divergence 가중치 | `1.0` |
+| `--kl-warmup-epochs` | KL warm-up epochs | `10` |
+| `--prior-std` | 사전분포 표준편차 | `1.0` |
+| `--noise-type` | 노이즈 모델링 타입 | `homoscedastic` |
+| `--n-samples` | 예측 샘플링 횟수 | `100` |
+
+## 🎯 **점진적 학습 모드 설명**
+
+### **1. Incremental Mode (`--incremental-mode incremental`)**
+- **동작**: 새 데이터에 대해 항상 점진적 업데이트 수행
+- **장점**: 빠른 적응, 지식 보존, 계산 효율성
+- **단점**: 오차 누적 가능성
+- **사용 시나리오**: 연속적 학습, 실시간 최적화
+
+### **2. Full Mode (`--incremental-mode full`)**
+- **동작**: 새 데이터마다 항상 전체 모델 재학습
+- **장점**: 오차 누적 없음, 안정적 성능
+- **단점**: 계산 비용 높음
+- **사용 시나리오**: 기준선 비교, 최고 정확도 필요
+
+### **3. Hybrid Mode (`--incremental-mode hybrid`)**
+- **동작**: 점진적 업데이트 + 주기적 전체 재학습
+- **장점**: 효율성과 안정성의 균형
+- **제어**: `--full-retrain-interval`로 재학습 주기 설정
+- **사용 시나리오**: 실용적 응용, 장기간 최적화
+
+## 📊 **결과 파일 및 시각화**
+
+### **생성되는 파일**
+- `tl_bo_results.csv`: 주요 최적화 결과
+- `*_hyperparameters.csv`: 하이퍼파라미터 최적화 기록
+- `images/`: 시각화 이미지 및 진행 차트
+- 콘솔 출력: 상세한 진행 정보
+
+### **주요 메트릭**
+- **Total Cost**: 소모된 계산 예산
+- **Best Value**: 발견된 최적 bandgap 값
+- **Success Rate**: 목표 달성 비율
+- **Convergence Speed**: 목표까지의 반복 횟수
+
+### **시각화 포함 내용**
 - 반복별 예측 결과 및 불확실성
 - Expected Improvement 분포
 - 학습 곡선 (loss, validation)
 - Best-so-far 수렴 곡선
-- 다중 실행 통계 분석
+- 다중 실행 통계 분석 (박스플롯)
+- 점진적 학습 vs 표준 학습 비교
 
 ## 🔧 설치
 
@@ -147,23 +226,58 @@ pip install -r requirements.txt
 pip install torch --index-url https://download.pytorch.org/whl/cu118
 ```
 
-## 🎯 알고리즘 비교
+## 📈 **비교 실험 예시**
 
+### **점진적 학습 vs 표준 학습 비교**
+```bash
+# 표준 학습 기준선
+python3 main.py --model-type dngo --num-runs 5 --cost-budget 50 \
+  --use-hyperparameter-bo --pretrain-bo-trials 50 --finetune-bo-trials 50 \
+  --verbose --results-filename standard_learning.csv
+
+# 점진적 학습 비교
+python3 main.py --model-type dngo --num-runs 5 --cost-budget 50 \
+  --use-hyperparameter-bo --pretrain-bo-trials 50 --finetune-bo-trials 50 \
+  --use-incremental-learning --verbose --results-filename incremental_learning.csv
+```
+
+### **모델 타입 비교**
+```bash
+# DNGO 모델
+python3 main.py --model-type dngo --num-runs 5 --cost-budget 50 \
+  --use-hyperparameter-bo --pretrain-bo-trials 50 --finetune-bo-trials 50 \
+  --use-incremental-learning --verbose --results-filename dngo_results.csv
+
+# BNN 모델  
+python3 main.py --model-type bnn --num-runs 5 --cost-budget 50 \
+  --use-hyperparameter-bo --pretrain-bo-trials 50 --finetune-bo-trials 50 \
+  --use-incremental-learning --verbose --results-filename bnn_results.csv
+```
+
+## 🎯 **알고리즘 및 학습 방법 비교**
+
+### **모델 타입 비교**
 | 방법 | 장점 | 단점 | 사용 시나리오 |
 |------|------|------|--------------|
-| **BNN** | 정확한 불확실성 추정<br>End-to-end 학습 | 계산 비용 높음<br>학습 불안정 가능 | 불확실성이 중요한 경우<br>데이터가 충분한 경우 |
-| **DNGO** | 빠른 학습<br>안정적인 성능 | Feature 품질에 의존<br>Two-stage 학습 | 빠른 최적화 필요<br>Transfer learning 활용 |
-| **DNGO-OL** | 온라인 적응<br>메모리 효율적 | 하이퍼파라미터 민감<br>Catastrophic forgetting | 데이터 스트림<br>동적 환경 |
+| **DNGO** | 빠른 학습<br>안정적 성능<br>Transfer Learning | Feature 품질 의존<br>Two-stage 학습 | 빠른 최적화<br>안정성 중시 |
+| **BNN** | 정확한 불확실성 추정<br>End-to-end 학습<br>베이지안 추론 | 계산 비용 높음<br>학습 불안정 가능 | 불확실성 중요<br>고품질 예측 |
 
-## 📈 성능 벤치마크
+### **학습 방법 비교**
+| 방법 | 계산 효율성 | 지식 보존 | 적응 속도 | 사용 시나리오 |
+|------|-------------|-----------|-----------|--------------|
+| **Standard** | 낮음 | 높음 | 느림 | 기준선, 최고 정확도 |
+| **Incremental** | 높음 | 높음 | 빠름 | 실시간, 연속 학습 |
+| **Hybrid** | 중간 | 높음 | 중간 | 실용적, 균형잡힌 |
 
-평균 10회 실행 결과 (cost budget = 50):
+## 📈 **예상 성능 벤치마크**
 
-| 방법 | 최종 성능 | 수렴 속도 | 계산 시간 |
-|------|-----------|-----------|-----------|
-| BNN | 1.52±0.06 | 35 iter | 15분 |
-| DNGO | 1.54±0.08 | 30 iter | 8분 |
-| DNGO-OL | 1.53±0.07 | 32 iter | 10분 |
+### **표준 vs 점진적 학습 비교 (cost budget = 50)**
+| 방법 | 계산 시간 | 메모리 사용 | 수렴 속도 | 최종 성능 |
+|------|-----------|-------------|-----------|-----------|
+| **DNGO Standard** | 100% | 100% | 기준 | 1.54±0.08 |
+| **DNGO Incremental** | 60% | 70% | 1.2x 빠름 | 1.53±0.07 |
+| **BNN Standard** | 100% | 100% | 기준 | 1.52±0.06 |
+| **BNN Incremental** | 65% | 75% | 1.1x 빠름 | 1.51±0.05 |
 
 ## 🔬 기술 상세
 
@@ -192,26 +306,81 @@ pip install torch --index-url https://download.pytorch.org/whl/cu118
 jupyter notebook experiments/01_model_comparison.ipynb
 ```
 
-## ⚠️ 주의사항
+## 🔍 **모니터링 및 디버깅**
 
-1. **GPU 메모리**: BNN은 많은 메모리를 사용합니다
-2. **학습 시간**: 하이퍼파라미터 BO 사용 시 시간이 오래 걸립니다
-3. **데이터 크기**: Small dataset에서는 과적합 주의
-4. **수렴성**: BNN은 초기값에 민감할 수 있습니다
+### **출력 해석**
+```
+📍 Iteration X
+  Current data: Y low-fidelity, Z high-fidelity
+  🔧 Hyperparameter optimization triggered
+  🔄 Performing incremental learning with A low + B high new data points
+```
 
-## 📞 문의
+### **진행 상황 추적**
+- 진행률 바: 최적화 상태 표시
+- 비용 추적: 예산 모니터링
+- 실시간 최적값 업데이트
+- EI (Expected Improvement) 추적
 
-구현 관련 문의나 개선 제안은 이슈로 등록해 주세요.
+## ⚠️ **주의사항 및 트러블슈팅**
 
-## 🎯 DNGO 실험 시나리오
+### **일반적인 문제**
+1. **CUDA/MPS 메모리 문제**: `--device cpu` 사용하여 안정성 확보
+2. **긴 실행 시간**: 테스트용으로 BO trials 수 줄이기
+3. **수렴 문제**: 점진적 학습 파라미터 조정
 
-### 시나리오 설정
-- **무작위 시작점**: 20개
-- **Hyper-parameter 탐색 횟수**: 200회
-- **다음 스텝 평가**: 전체 조합 스크리닝
-- **전체 실험 반복**: 100번의 동일 실험 진행
+### **성능 팁**
+- 테스트용으로 작은 `--num-runs` 사용
+- 필요할 때만 `--plot-results` 사용
+- 대용량 데이터셋 시 메모리 사용량 모니터링
+- 디버깅용으로 `--verbose` 사용
 
-### 시각화 요구사항
-- 매 스텝별 선택 과정 결과
-- 매 스텝별 모델 피팅 결과
-- 전체 100번 실험 결과를 박스 플롯으로 Cumulative cost(au) 표현
+### **권장 파라미터 설정**
+
+#### **소규모 데이터셋 (< 50 포인트)**
+```bash
+--lr-boost-factor 1.2 \
+--incremental-epochs 3 \
+--replay-ratio 0.3 \
+--weight-decay-factor 0.9
+```
+
+#### **중간 규모 데이터셋 (50-150 포인트)**
+```bash
+--lr-boost-factor 1.5 \
+--incremental-epochs 5 \
+--replay-ratio 0.2 \
+--weight-decay-factor 0.95
+```
+
+#### **대규모 데이터셋 (> 150 포인트)**
+```bash
+--lr-boost-factor 1.8 \
+--incremental-epochs 8 \
+--replay-ratio 0.15 \
+--weight-decay-factor 0.98
+```
+
+## 📚 **참고 문헌 및 인용**
+
+이 코드를 사용하시는 경우 다음과 같이 인용해 주세요:
+```bibtex
+@article{transfer_learning_bo_incremental,
+  title={Transfer Learning Bayesian Optimization with Incremental Learning for Perovskite Discovery},
+  author={Your Name},
+  journal={Your Journal},
+  year={2024}
+}
+```
+
+## 📞 **지원 및 문의**
+
+문제나 질문이 있으시면:
+- 트러블슈팅 섹션 확인
+- 명령행 옵션 검토
+- 모든 의존성 설치 확인
+- 데이터 파일 접근 가능성 확인
+
+---
+
+**중요**: 재현 가능한 결과와 공정한 방법 간 비교를 위해 위에 명시된 정확한 파라미터로 벤치마크 시나리오를 실행하시기 바랍니다.

@@ -1,3 +1,0 @@
-iteration,pretrain_hidden_layers,pretrain_hidden_dim,pretrain_learning_rate,pretrain_epochs,finetune_hidden_layers,finetune_hidden_dim,finetune_learning_rate,finetune_epochs
-1,2,32,0.005,115,1,16,0.01,70
-2,3,128,0.001,162,3,64,0.0005,112

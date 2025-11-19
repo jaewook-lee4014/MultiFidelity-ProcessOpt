@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.metrics import r2_score, mean_absolute_error
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import os
 from datetime import datetime
 from pathlib import Path
@@ -513,12 +513,13 @@ def plot_bnn_optimization_summary(result: Dict) -> None:
     plt.show()
 
 
-def plot_optimization_results(result: Dict) -> None:
+def plot_optimization_results(result: Dict, save_path: Optional[str] = None) -> None:
     """
     최적화 결과를 종합적으로 시각화 (기존 DNGO 방식 유지)
     
     Args:
         result: 최적화 결과 딕셔너리
+        save_path: 저장 경로 (None이면 화면에 표시)
     """
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
     
@@ -585,7 +586,12 @@ def plot_optimization_results(result: Dict) -> None:
                  fontsize=14, fontweight='bold')
     
     plt.tight_layout()
-    plt.show()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
 
 
 def plot_bnn_full_analysis(model, blr, ori_data: pd.DataFrame, X_grid: np.ndarray, 

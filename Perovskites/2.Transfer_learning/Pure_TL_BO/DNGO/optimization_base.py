@@ -3,7 +3,14 @@ import itertools
 import time
 from scipy.stats import norm
 from typing import List, Tuple, Dict, Optional
-from .models import TransferLearningDNN, BayesianLinearRegression
+# Universal imports - model specific imports are conditional based on model_type
+from .models import BayesianLinearRegression  # BLR is used by both models
+try:
+    from .models import TransferLearningDNN  # Only needed for DNGO
+except ImportError:
+    TransferLearningDNN = None
+from tqdm import tqdm
+import torch.nn as nn
 
 
 def expected_improvement(mu: np.ndarray, sigma: np.ndarray, y_best: float, xi: float = 0.01) -> np.ndarray:
@@ -44,9 +51,10 @@ def train_model(X_low: np.ndarray, y_low: np.ndarray, X_high: np.ndarray, y_high
                 pretrain_lr: float = 1e-3, finetune_lr: float = 1e-4,
                 use_hyperparameter_bo: bool = False, pretrain_bo_trials: int = 0,
                 finetune_bo_trials: int = 0, data_size: str = 'small',
-                verbose: bool = False) -> TransferLearningDNN:
+                verbose: bool = False, model_type: str = 'DNGO', hidden_dims: list = None,
+                incremental_params: Dict = None):
     """
-    Transfer Learning DNN 모델 학습 (하이퍼파라미터 BO 지원)
+    Universal Transfer Learning 모델 학습 (DNGO/BNN 모두 지원, 하이퍼파라미터 BO 지원)
     
     Args:
         X_low: low-fidelity 입력 데이터
@@ -65,16 +73,45 @@ def train_model(X_low: np.ndarray, y_low: np.ndarray, X_high: np.ndarray, y_high
         finetune_bo_trials: finetune BO 시행 횟수
         data_size: 데이터 크기 ('small', 'medium', 'large')
         verbose: 상세 출력
+        model_type: 모델 타입 ('DNGO' 또는 'BNN')
+        hidden_dims: BNN용 hidden 차원 리스트 (BNN 모델에만 사용)
+        incremental_params: 점진적 학습 파라미터 딕셔너리
         
     Returns:
-        학습된 TransferLearningDNN 모델
+        학습된 TransferLearningDNN 또는 TransferLearningBNN 모델
     """
-    model = TransferLearningDNN(
-        input_dim=input_dim, 
-        hidden_dim=hidden_dim, 
-        device=device,
-        use_hyperparameter_bo=use_hyperparameter_bo
-    )
+    # 모델 타입에 따른 모델 생성
+    if model_type.upper() == 'DNGO':
+        if TransferLearningDNN is None:
+            raise ImportError("TransferLearningDNN not found. Please ensure DNGO module is available.")
+        model = TransferLearningDNN(
+            input_dim=input_dim, 
+            hidden_dim=hidden_dim, 
+            device=device,
+            use_hyperparameter_bo=use_hyperparameter_bo
+        )
+        # 점진적 학습 파라미터 설정
+        if incremental_params:
+            model.incremental_params = incremental_params
+    elif model_type.upper() == 'BNN':
+        # BNN 모델 임포트 및 생성
+        try:
+            from BNN.bnn_models import TransferLearningBNN
+            # BNN은 hidden_dims 리스트를 사용, 제공되지 않으면 기본값 사용
+            bnn_hidden_dims = hidden_dims if hidden_dims is not None else [hidden_dim, hidden_dim]
+            model = TransferLearningBNN(
+                input_dim=input_dim,
+                hidden_dims=bnn_hidden_dims,
+                device=device,
+                use_hyperparameter_bo=use_hyperparameter_bo
+            )
+            # 점진적 학습 파라미터 설정
+            if incremental_params:
+                model.incremental_params = incremental_params
+        except ImportError as e:
+            raise ImportError(f"BNN model not found. Please ensure BNN module is available. Original error: {e}")
+    else:
+        raise ValueError(f"Unsupported model_type: {model_type}. Use 'DNGO' or 'BNN'.")
     
     # Pretrain with low-fidelity data
     if len(X_low) > 0:
@@ -107,45 +144,92 @@ def train_model(X_low: np.ndarray, y_low: np.ndarray, X_high: np.ndarray, y_high
     return model
 
 
-def fit_blr(model: TransferLearningDNN, X_low: np.ndarray, X_high: np.ndarray, 
-            y_low: np.ndarray, y_high: np.ndarray, alpha: float = 1.0, beta: float = 25.0):
+def fit_blr(model, X_low: np.ndarray, X_high: np.ndarray, 
+            y_low: np.ndarray, y_high: np.ndarray, alpha: float = 1.0, beta: float = 25.0,
+            use_incremental: bool = False, new_X_low: np.ndarray = None, new_y_low: np.ndarray = None,
+            new_X_high: np.ndarray = None, new_y_high: np.ndarray = None):
     """
-    Bayesian Linear Regression 학습
+    Bayesian Linear Regression 학습 (DNGO/BNN 범용, 점진적 학습 지원)
+    Transfer Learning 구조: LOFI 모델 → HIFI 모델 (fine-tuned)
+    
+    Args:
+        model: 특성 추출 모델
+        X_low, y_low: 저보정도 데이터
+        X_high, y_high: 고보정도 데이터
+        alpha, beta: BLR 하이퍼파라미터
+        use_incremental: 점진적 학습 사용 여부
+        new_X_low, new_y_low: 새로운 저보정도 데이터 (점진적 학습용)
+        new_X_high, new_y_high: 새로운 고보정도 데이터 (점진적 학습용)
     """
-    # 전체 데이터 결합
-    X_all = np.vstack([X_low, X_high]) if len(X_high) > 0 else X_low
-    y_all = np.concatenate([y_low, y_high]) if len(y_high) > 0 else y_low
+    # 모델에 저장된 BLR 인스턴스가 있으면 재사용 (점진적 학습용)
+    blr_low = getattr(model, 'blr_low', None)
+    blr_high = getattr(model, 'blr_high', None)
     
-    # Feature 추출
-    features_all = model.extract_features(X_all)
+    if use_incremental and blr_low is not None and blr_high is not None:
+        # 점진적 업데이트 수행
+        if new_X_low is not None and len(new_X_low) > 0:
+            new_features_low = model.extract_features(new_X_low)
+            for i in range(len(new_features_low)):
+                blr_low.incremental_update(new_features_low[i:i+1], new_y_low[i:i+1])
+        
+        if new_X_high is not None and len(new_X_high) > 0:
+            new_features_high = model.extract_features(new_X_high)
+            for i in range(len(new_features_high)):
+                blr_high.incremental_update(new_features_high[i:i+1], new_y_high[i:i+1])
+    else:
+        # 전체 재학습 (기존 방식)
+        # LOFI 모델용 BLR (low-fidelity 데이터만 사용)
+        blr_low = None
+        if len(X_low) > 0:
+            features_low = model.extract_features(X_low)
+            blr_low = BayesianLinearRegression(alpha=alpha, beta=beta)
+            blr_low.fit(features_low, y_low)
+        
+        # HIFI 모델용 BLR (LOFI로 pretrain된 모델을 HIFI로 fine-tune)
+        # 이미 model은 pretrain + finetune이 완료된 상태
+        blr_high = None
+        if len(X_high) > 0:
+            # Transfer Learning: LOFI + HIFI 데이터 모두 사용
+            X_all = np.vstack([X_low, X_high]) if len(X_low) > 0 else X_high
+            y_all = np.concatenate([y_low, y_high]) if len(y_low) > 0 else y_high
+            features_all = model.extract_features(X_all)
+            blr_high = BayesianLinearRegression(alpha=alpha, beta=beta)
+            blr_high.fit(features_all, y_all)
+        else:
+            # HIFI 데이터가 없으면 LOFI 모델을 그대로 사용
+            blr_high = blr_low
+        
+        # 모델에 BLR 인스턴스 저장 (다음 점진적 업데이트를 위해)
+        model.blr_low = blr_low
+        model.blr_high = blr_high
     
-    # BLR 학습
-    blr = BayesianLinearRegression(alpha=alpha, beta=beta)
-    blr.fit(features_all, y_all)
-    
-    return blr, X_all, y_all
+    return blr_low, blr_high
 
 
-def recommend_next(model: TransferLearningDNN, blr: BayesianLinearRegression, 
+def recommend_next(model, blr_low: BayesianLinearRegression, blr_high: BayesianLinearRegression,
                    param_ranges: List[range], X_low: np.ndarray, X_high: np.ndarray,
                    y_low: np.ndarray, y_high: np.ndarray, s: float) -> Tuple:
     """
-    다음 실험점 추천 (Expected Improvement 최대화)
+    다음 실험점 추천 (Expected Improvement 최대화, DNGO/BNN 범용)
+    각 fidelity level에 대해 독립적으로 EI 계산
     """
     # 전체 조합 생성
     all_combinations = list(itertools.product(*param_ranges))
     X_grid = np.array(all_combinations, dtype=np.float32)
     
-    # 현재까지의 최적값 (high-fidelity만 고려)
-    if len(y_high) > 0:
-        y_best = np.min(y_high)
-    else:
-        y_best = np.inf
-    
-    # 전체 조합에 대한 예측
+    # Feature 추출
     features_grid = model.extract_features(X_grid)
-    y_pred, y_std = [], []
     
+    # 현재 fidelity에 따라 적절한 모델 선택
+    if s == 1.0:  # High-fidelity
+        blr = blr_high
+        y_best = np.min(y_high) if len(y_high) > 0 else np.inf
+    else:  # Low-fidelity
+        blr = blr_low if blr_low is not None else blr_high
+        y_best = np.min(y_low) if len(y_low) > 0 else np.inf
+    
+    # 선택된 모델로 예측
+    y_pred, y_std = [], []
     for phi in features_grid:
         mu, var = blr.predict(phi)
         y_pred.append(mu)
@@ -156,6 +240,32 @@ def recommend_next(model: TransferLearningDNN, blr: BayesianLinearRegression,
     
     # Expected Improvement 계산
     ei = expected_improvement(y_pred, y_std, y_best)
+    
+    # 각 모델별 예측값도 저장 (시각화용)
+    y_pred_low, y_std_low, ei_low = [], [], []
+    y_pred_high, y_std_high, ei_high = [], [], []
+    
+    # LOFI 모델 예측
+    if blr_low is not None:
+        y_best_low = np.min(y_low) if len(y_low) > 0 else np.inf
+        for phi in features_grid:
+            mu, var = blr_low.predict(phi)
+            y_pred_low.append(mu)
+            y_std_low.append(np.sqrt(var))
+        y_pred_low = np.array(y_pred_low)
+        y_std_low = np.array(y_std_low)
+        ei_low = expected_improvement(y_pred_low, y_std_low, y_best_low)
+    
+    # HIFI 모델 예측
+    if blr_high is not None:
+        y_best_high = np.min(y_high) if len(y_high) > 0 else np.inf
+        for phi in features_grid:
+            mu, var = blr_high.predict(phi)
+            y_pred_high.append(mu)
+            y_std_high.append(np.sqrt(var))
+        y_pred_high = np.array(y_pred_high)
+        y_std_high = np.array(y_std_high)
+        ei_high = expected_improvement(y_pred_high, y_std_high, y_best_high)
     
     # 이미 측정된 점들을 fidelity별로 구분하여 저장
     measured_points = set()
@@ -187,7 +297,20 @@ def recommend_next(model: TransferLearningDNN, blr: BayesianLinearRegression,
     
     next_x_label = list(X_grid[best_idx].astype(int))
     
-    return next_x_label, y_pred, y_std, ei, best_idx, X_grid
+    # 각 모델별 예측 결과 반환
+    predictions = {
+        'y_pred': y_pred,      # 현재 fidelity 모델의 예측
+        'y_std': y_std,
+        'ei': ei,
+        'y_pred_low': np.array(y_pred_low) if y_pred_low is not None else None,
+        'y_std_low': np.array(y_std_low) if y_std_low is not None else None,
+        'ei_low': np.array(ei_low) if ei_low is not None else None,
+        'y_pred_high': np.array(y_pred_high) if y_pred_high is not None else None,
+        'y_std_high': np.array(y_std_high) if y_std_high is not None else None,
+        'ei_high': np.array(ei_high) if ei_high is not None else None
+    }
+    
+    return next_x_label, predictions, best_idx, X_grid
 
 
 def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
@@ -197,9 +320,11 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
                            model_config: Dict = None, 
                            use_hyperparameter_bo: bool = False,
                            pretrain_bo_trials: int = 0, finetune_bo_trials: int = 0,
-                           data_size: str = 'small') -> Dict:
+                           data_size: str = 'small', model_type: str = 'DNGO',
+                           use_incremental_learning: bool = False,
+                           incremental_params: Dict = None) -> Dict:
     """
-    단일 최적화 실행 (하이퍼파라미터 BO 지원)
+    범용 단일 최적화 실행 (DNGO/BNN 모두 지원, 하이퍼파라미터 BO 지원)
     
     Args:
         param_space: 파라미터 공간
@@ -216,6 +341,9 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
         pretrain_bo_trials: pretrain BO 시행 횟수
         finetune_bo_trials: finetune BO 시행 횟수
         data_size: 데이터 크기
+        model_type: 모델 타입 ('DNGO' 또는 'BNN')
+        use_incremental_learning: 점진적 학습 사용 여부
+        incremental_params: 점진적 학습 파라미터
         
     Returns:
         결과 딕셔너리 (비용, best_so_far 곡선, 시간 등)
@@ -260,6 +388,16 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
     hyperparameter_history = []  # 하이퍼파라미터 기록
     visualization_data = []  # 시각화용 데이터
     
+    # 하이퍼파라미터 최적화 관련 변수
+    last_optimized_params = None  # 마지막으로 최적화된 파라미터 저장
+    last_optimization_iter = 0  # 마지막 최적화 시점
+    optimization_interval = 10  # 10개 데이터마다 최적화
+    
+    # 점진적 학습 관련 변수
+    previous_X_low, previous_y_low = X_low.copy(), y_low.copy()
+    previous_X_high, previous_y_high = X_high.copy(), y_high.copy()
+    model = None  # 모델 인스턴스 유지를 위해
+    
     # 초기 best_so_far 설정
     if len(y_high) > 0:
         best_so_far = np.min(y_high)
@@ -268,53 +406,250 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
         print(f"Initial cost: {total_cost:.2f}, Initial best_so_far: {best_so_far}")
         if use_hyperparameter_bo:
             print(f"🔧 Using hyperparameter BO: pretrain={pretrain_bo_trials}, finetune={finetune_bo_trials}")
+        if use_incremental_learning:
+            print(f"🔄 Using incremental learning with params: {incremental_params}")
     
-    # 메인 최적화 루프
+    # 예상 iteration 수 계산 (대략적인 추정)
+    estimated_iterations = int(cost_budget - total_cost) + 1
+    
+    # 메인 최적화 루프 with progress bar
+    pbar = tqdm(total=cost_budget, initial=total_cost, desc="Optimization Progress", 
+                unit="cost", disable=not verbose)
+    
     while total_cost < cost_budget:
         iter_ += 1
         iter_start = time.time()
         
+        # Progress bar에 iteration 정보 표시
+        pbar.set_description(f"Optimization [Iter {iter_}]")
+        
+        # 출력 구분을 위한 구분선
+        if verbose and iter_ > 1:
+            print("\n" + "="*60)
+        
         if verbose:
-            print(f"\n==== Iteration {iter_} ====")
+            print(f"\n📍 Iteration {iter_}")
+            print(f"  Current data: {len(X_low)} low-fidelity, {len(X_high)} high-fidelity")
         
         # Fidelity 스케줄링: 8번 중 1번만 high-fidelity
         s = 1.0 if (iter_ % 8 == 0) else 0.1
         
-        # 모델 학습 (하이퍼파라미터 BO 포함)
-        model = train_model(
-            X_low, y_low, X_high, y_high, 
-            input_dim=model_config['input_dim'],
-            hidden_dim=model_config['hidden_dim'],
-            device=model_config['device'],
-            pretrain_epochs=model_config['pretrain_epochs'],
-            finetune_epochs=model_config['finetune_epochs'],
-            use_hyperparameter_bo=use_hyperparameter_bo,
-            pretrain_bo_trials=pretrain_bo_trials,
-            finetune_bo_trials=finetune_bo_trials,
-            data_size=data_size,
-            verbose=verbose
-        )
+        # 전체 데이터 수 계산
+        total_data_points = len(X_low) + len(X_high)
         
-        # 하이퍼파라미터 기록
+        # 하이퍼파라미터 최적화 여부 결정
+        should_optimize_hp = False
         if use_hyperparameter_bo:
+            # 첫 iteration이거나, 10개씩 증가할 때마다 최적화
+            if (iter_ == 1) or \
+               (total_data_points > 0 and total_data_points % optimization_interval == 0):
+                should_optimize_hp = True
+                if verbose:
+                    print(f"\n  🔧 Hyperparameter optimization triggered (data points: {total_data_points})")
+        
+        # 새로운 데이터 확인 (점진적 학습용)
+        new_X_low = X_low[len(previous_X_low):] if len(X_low) > len(previous_X_low) else np.array([])
+        new_y_low = y_low[len(previous_y_low):] if len(y_low) > len(previous_y_low) else np.array([])
+        new_X_high = X_high[len(previous_X_high):] if len(X_high) > len(previous_X_high) else np.array([])
+        new_y_high = y_high[len(previous_y_high):] if len(y_high) > len(previous_y_high) else np.array([])
+        
+        has_new_data = len(new_X_low) > 0 or len(new_X_high) > 0
+        
+        # 모델 학습 결정
+        use_incremental_this_iter = (use_incremental_learning and 
+                                   incremental_params is not None and 
+                                   model is not None and 
+                                   has_new_data and 
+                                   not should_optimize_hp)
+        
+        # 모델 학습
+        if should_optimize_hp:
+            # 하이퍼파라미터 최적화 수행
+            # 모델 타입에 따른 hidden_dim 설정
+            if model_type.upper() == 'BNN':
+                # BNN은 hidden_dims (list)를 사용
+                hidden_dim_param = model_config.get('hidden_dims', [64, 64])[0]  # 첫 번째 차원 사용
+            else:
+                # DNGO는 hidden_dim (int)를 사용
+                hidden_dim_param = model_config['hidden_dim']
+            
+            # BNN의 경우 hidden_dims 전달
+            hidden_dims_param = None
+            if model_type.upper() == 'BNN':
+                hidden_dims_param = model_config.get('hidden_dims', [64, 64])
+            
+            model = train_model(
+                X_low, y_low, X_high, y_high, 
+                input_dim=model_config['input_dim'],
+                hidden_dim=hidden_dim_param,
+                device=model_config['device'],
+                pretrain_epochs=model_config['pretrain_epochs'],
+                finetune_epochs=model_config['finetune_epochs'],
+                use_hyperparameter_bo=True,
+                pretrain_bo_trials=pretrain_bo_trials,
+                finetune_bo_trials=finetune_bo_trials,
+                data_size=data_size,
+                verbose=verbose,
+                model_type=model_type,
+                hidden_dims=hidden_dims_param,
+                incremental_params=incremental_params
+            )
+            
+            # 최적화된 파라미터 저장
             hp_summary = model.get_hyperparameter_summary()
-            hyperparameter_history.append({
-                'iteration': iter_,
+            last_optimized_params = {
                 'pretrain_params': hp_summary['pretrain_best_params'],
                 'finetune_params': hp_summary['finetune_best_params']
-            })
+            }
+            last_optimization_iter = total_data_points
             
-            if verbose and hp_summary['pretrain_best_params']:
-                print(f"🔧 Pretrain params: {hp_summary['pretrain_best_params']}")
-            if verbose and hp_summary['finetune_best_params']:
-                print(f"🔧 Finetune params: {hp_summary['finetune_best_params']}")
+            # 하이퍼파라미터 기록
+            hyperparameter_history.append({
+                'iteration': iter_,
+                'data_points': total_data_points,
+                'pretrain_params': hp_summary['pretrain_best_params'],
+                'finetune_params': hp_summary['finetune_best_params'],
+                'pretrain_trials': hp_summary.get('pretrain_bo_history', []),
+                'finetune_trials': hp_summary.get('finetune_bo_history', [])
+            })
+        else:
+            # 이전에 최적화된 파라미터 사용 또는 기본 파라미터 사용
+            if verbose and use_hyperparameter_bo and last_optimized_params:
+                print(f"\n  📌 Using previously optimized hyperparameters")
+            
+            if last_optimized_params and use_hyperparameter_bo:
+                # 이전 파라미터 사용
+                pretrain_params = last_optimized_params['pretrain_params']
+                finetune_params = last_optimized_params['finetune_params']
+                
+                # 모델 타입별 모델 생성
+                if model_type.upper() == 'DNGO':
+                    if TransferLearningDNN is None:
+                        raise ImportError("TransferLearningDNN not found. Please ensure DNGO module is available.")
+                    model = TransferLearningDNN(
+                        input_dim=model_config['input_dim'],
+                        hidden_dim=model_config['hidden_dim'],  # 기본값 사용 (동적 구조는 pretrain에서 설정)
+                        device=model_config['device'],
+                        use_hyperparameter_bo=False
+                    )
+                    
+                    # Pretrain with optimized parameters (DNGO)
+                    if len(X_low) > 0 and pretrain_params:
+                        # 최적화된 구조로 모델 재구성
+                        model._build_dynamic_model(pretrain_params)
+                        model.pretrain(
+                            X_low, y_low,
+                            epochs=pretrain_params['epochs'],
+                            lr=pretrain_params['learning_rate'],
+                            verbose=False
+                        )
+                    
+                    # Finetune with optimized parameters (DNGO)
+                    if len(X_high) > 0 and finetune_params:
+                        # Feature extractor는 유지하고 출력층만 재구성
+                        feature_dim = model.feature_net[-2].out_features  # 마지막 hidden layer의 출력 차원
+                        model.out_layer = nn.Linear(feature_dim, 1, bias=False).to(model.device).float()
+                        model.model = nn.Sequential(model.feature_net, model.out_layer)
+                        
+                        model.finetune(
+                            X_high, y_high,
+                            epochs=finetune_params['epochs'],
+                            lr=finetune_params['learning_rate'],
+                            verbose=False
+                        )
+                        
+                elif model_type.upper() == 'BNN':
+                    # BNN 모델 생성
+                    from BNN.bnn_models import TransferLearningBNN
+                    
+                    # BNN은 하이퍼파라미터가 다를 수 있으므로 기본 파라미터 사용
+                    hidden_dims = pretrain_params.get('hidden_dims', model_config.get('hidden_dims', [64, 64]))
+                    
+                    model = TransferLearningBNN(
+                        input_dim=model_config['input_dim'],
+                        hidden_dims=hidden_dims,
+                        device=model_config['device'],
+                        use_hyperparameter_bo=False
+                    )
+                    
+                    # Pretrain with optimized parameters (BNN)
+                    if len(X_low) > 0 and pretrain_params:
+                        model.pretrain(
+                            X_low, y_low,
+                            epochs=pretrain_params.get('epochs', model_config['pretrain_epochs']),
+                            lr=pretrain_params.get('learning_rate', model_config.get('pretrain_lr', 1e-3)),
+                            verbose=False
+                        )
+                    
+                    # Finetune with optimized parameters (BNN)  
+                    if len(X_high) > 0 and finetune_params:
+                        model.finetune(
+                            X_high, y_high,
+                            epochs=finetune_params.get('epochs', model_config['finetune_epochs']),
+                            lr=finetune_params.get('learning_rate', model_config.get('finetune_lr', 1e-4)),
+                            verbose=False
+                        )
+            else:
+                # 기본 파라미터로 모델 학습
+                # 모델 타입에 따른 hidden_dim 설정
+                if model_type.upper() == 'BNN':
+                    # BNN은 hidden_dims (list)를 사용
+                    hidden_dim_param = model_config.get('hidden_dims', [64, 64])[0]  # 첫 번째 차원 사용
+                else:
+                    # DNGO는 hidden_dim (int)를 사용
+                    hidden_dim_param = model_config['hidden_dim']
+                
+                # BNN의 경우 hidden_dims 전달
+                hidden_dims_param = None
+                if model_type.upper() == 'BNN':
+                    hidden_dims_param = model_config.get('hidden_dims', [64, 64])
+                
+                model = train_model(
+                    X_low, y_low, X_high, y_high,
+                    input_dim=model_config['input_dim'],
+                    hidden_dim=hidden_dim_param,
+                    device=model_config['device'],
+                    pretrain_epochs=model_config['pretrain_epochs'],
+                    finetune_epochs=model_config['finetune_epochs'],
+                    use_hyperparameter_bo=False,
+                    verbose=False,
+                    model_type=model_type,
+                    hidden_dims=hidden_dims_param,
+                    incremental_params=incremental_params
+                )
+            
         
-        # BLR 학습
-        blr, X_all, y_all = fit_blr(model, X_low, X_high, y_low, y_high)
+        # 점진적 학습 처리 (별도 블록)
+        if use_incremental_this_iter:
+            # 점진적 학습 수행
+            if verbose:
+                print(f"  🔄 Performing incremental learning with {len(new_X_low)} low + {len(new_X_high)} high new data points")
+            
+            # 모델 점진적 업데이트
+            if hasattr(model, 'incremental_update'):
+                if len(new_X_low) > 0:
+                    model.incremental_update(new_X_low, new_y_low, fidelity='low')
+                if len(new_X_high) > 0:
+                    model.incremental_update(new_X_high, new_y_high, fidelity='high')
         
-        # 다음 실험점 추천
-        next_x_label, y_pred, y_std, ei, best_idx, X_grid = recommend_next(
-            model, blr, param_ranges, X_low, X_high, y_low, y_high, s
+        # BLR 학습 (Transfer Learning: LOFI → HIFI)
+        if use_incremental_this_iter:
+            # 점진적 BLR 업데이트
+            blr_low, blr_high = fit_blr(
+                model, X_low, X_high, y_low, y_high,
+                use_incremental=True,
+                new_X_low=new_X_low if len(new_X_low) > 0 else None,
+                new_y_low=new_y_low if len(new_y_low) > 0 else None,
+                new_X_high=new_X_high if len(new_X_high) > 0 else None,
+                new_y_high=new_y_high if len(new_y_high) > 0 else None
+            )
+        else:
+            # 전체 재학습
+            blr_low, blr_high = fit_blr(model, X_low, X_high, y_low, y_high)
+        
+        # 다음 실험점 추천 (각 모델별로 독립적 예측)
+        next_x_label, predictions, best_idx, X_grid = recommend_next(
+            model, blr_low, blr_high, param_ranges, X_low, X_high, y_low, y_high, s
         )
         
         # 실제값 수집 (X_grid의 각 점에 대한 실제 bandgap 값)
@@ -343,6 +678,11 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
         y_actual = np.array([get_actual_bandgap(combo, lookup, label_maps, fidelity=1.0) 
                             for combo in X_grid])
         
+        # predictions에서 값 추출
+        y_pred = predictions['y_pred']
+        y_std = predictions['y_std']
+        ei = predictions['ei']
+        
         # 시각화용 데이터 저장
         viz_entry = {
             'iteration': iter_,
@@ -355,67 +695,36 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
             'fidelity': s,
             'recommended_point': next_x_label.copy(),
             'model': model,
-            'blr': blr,
+            'blr': blr_high if blr_high is not None else blr_low,  # 하위 호환성을 위해 유지
+            'blr_low': blr_low,    # LOFI 전용 모델
+            'blr_high': blr_high,  # HIFI 전용 모델
             'X_low': X_low.copy(),
             'y_low': y_low.copy(),
             'X_high': X_high.copy(),
-            'y_high': y_high.copy()
+            'y_high': y_high.copy(),
+            # LOFI와 HIFI 모델의 독립적인 예측 추가
+            'y_pred_low': predictions.get('y_pred_low').copy() if predictions.get('y_pred_low') is not None else None,
+            'y_std_low': predictions.get('y_std_low').copy() if predictions.get('y_std_low') is not None else None,
+            'ei_low': predictions.get('ei_low').copy() if predictions.get('ei_low') is not None else None,
+            'y_pred_high': predictions.get('y_pred_high').copy() if predictions.get('y_pred_high') is not None else None,
+            'y_std_high': predictions.get('y_std_high').copy() if predictions.get('y_std_high') is not None else None,
+            'ei_high': predictions.get('ei_high').copy() if predictions.get('ei_high') is not None else None
         }
         
         # 하이퍼파라미터 정보 추가 (베이지안 최적화 사용 시)
         if use_hyperparameter_bo:
             hp_summary = model.get_hyperparameter_summary()
-            viz_entry['hyperparameters'] = {
-                'pretrain_params': hp_summary['pretrain_best_params'],
-                'finetune_params': hp_summary['finetune_best_params']
-            }
+            viz_entry['hyperparameters'] = hp_summary  # 전체 summary 저장 (history 포함)
         
         visualization_data.append(viz_entry)
         
         # 측정
         measurement = measure_from_label(next_x_label, s, label_maps, lookup)
         
-        if verbose:
-            print(f"Recommended: {next_x_label} (fidelity: {s})")
-            print(f"Measurement: {measurement:.4f}")
-            print(f"Max EI: {ei[best_idx]:.6f}")
-            
-            # 베이지안 모델 성능 지표 출력
-            if len(X_high) > 0:  # High-fidelity 데이터가 있을 때만
-                # High-fidelity 훈련 데이터에 대한 예측값 계산
-                features_high = model.extract_features(X_high)
-                y_pred_high = []
-                for phi in features_high:
-                    mu, _ = blr.predict(phi)
-                    y_pred_high.append(mu)
-                y_pred_high = np.array(y_pred_high)
-                
-                # 성능 지표 계산
-                from sklearn.metrics import mean_squared_error, r2_score
-                mse = mean_squared_error(y_high, y_pred_high)
-                rmse = np.sqrt(mse)
-                r2 = r2_score(y_high, y_pred_high)
-                
-                print(f"🔧 Bayesian Model Performance (High-fidelity data):")
-                print(f"   MSE: {mse:.4f}, RMSE: {rmse:.4f}, R²: {r2:.4f}")
-            
-            if len(X_low) > 0:  # Low-fidelity 데이터가 있을 때
-                # Low-fidelity 훈련 데이터에 대한 예측값 계산
-                features_low = model.extract_features(X_low)
-                y_pred_low = []
-                for phi in features_low:
-                    mu, _ = blr.predict(phi)
-                    y_pred_low.append(mu)
-                y_pred_low = np.array(y_pred_low)
-                
-                # 성능 지표 계산
-                from sklearn.metrics import mean_squared_error, r2_score
-                mse_low = mean_squared_error(y_low, y_pred_low)
-                rmse_low = np.sqrt(mse_low)
-                r2_low = r2_score(y_low, y_pred_low)
-                
-                print(f"🔧 Bayesian Model Performance (Low-fidelity data):")
-                print(f"   MSE: {mse_low:.4f}, RMSE: {rmse_low:.4f}, R²: {r2_low:.4f}")
+        
+        # 이전 데이터 상태 업데이트 (다음 점진적 학습을 위해)
+        previous_X_low, previous_y_low = X_low.copy(), y_low.copy()
+        previous_X_high, previous_y_high = X_high.copy(), y_high.copy()
         
         # 데이터 업데이트
         X_low, y_low, X_high, y_high = append_measurement_to_data(
@@ -437,14 +746,18 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
         cost_data.append([0, iter_, total_cost])
         best_so_far_curve.append([0, iter_, s, best_so_far])
         
-        if verbose:
-            print(f"Cumulative cost: {total_cost:.2f}, best_so_far: {best_so_far:.4f}")
+        # Progress bar 업데이트
+        pbar.update(s)
+        pbar.set_postfix({'best': f'{best_so_far:.4f}', 'current': f'{measurement:.4f}', 'EI': f'{ei[best_idx]:.3f}'})
         
         # 조기 종료 조건
         if s == 1.0 and np.isclose(measurement, min_target, atol=1e-6):
             if verbose:
-                print('Found the minimum target value!')
+                print('\n✅ Found the minimum target value!')
             break
+    
+    # Progress bar 닫기
+    pbar.close()
     
     # 결과 호환성을 위한 데이터 변환
     best_values_history = [x[3] for x in best_so_far_curve]
@@ -470,7 +783,9 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
         'cost_history': cost_history,
         'fidelity_history': fidelity_history,
         'ei_history': ei_history,
-        'model_type': 'DNGO'
+        'model_type': model_type,
+        'use_incremental_learning': use_incremental_learning,
+        'incremental_params': incremental_params
     }
 
 
@@ -481,9 +796,11 @@ def multiple_optimization_runs(param_space: Dict, label_maps: Dict, lookup: Dict
                               save_results: bool = True, results_filename: str = 'tl_bo_results.csv',
                               use_hyperparameter_bo: bool = False, pretrain_bo_trials: int = 0,
                               finetune_bo_trials: int = 0, data_size: str = 'small',
-                              save_visualizations: bool = False, visualizations_dir: str = 'images') -> List[Dict]:
+                              save_visualizations: bool = False, visualizations_dir: str = 'images',
+                              model_type: str = 'DNGO', use_incremental_learning: bool = False,
+                              incremental_params: Dict = None) -> List[Dict]:
     """
-    다중 최적화 실행 (하이퍼파라미터 BO 지원)
+    범용 다중 최적화 실행 (DNGO/BNN 모두 지원, 하이퍼파라미터 BO 지원)
     """
     import pandas as pd
     
@@ -511,7 +828,10 @@ def multiple_optimization_runs(param_space: Dict, label_maps: Dict, lookup: Dict
             use_hyperparameter_bo=use_hyperparameter_bo,
             pretrain_bo_trials=pretrain_bo_trials,
             finetune_bo_trials=finetune_bo_trials,
-            data_size=data_size
+            data_size=data_size,
+            model_type=model_type,
+            use_incremental_learning=use_incremental_learning,
+            incremental_params=incremental_params
         )
         
         all_results.append(result)
@@ -525,7 +845,7 @@ def multiple_optimization_runs(param_space: Dict, label_maps: Dict, lookup: Dict
             
             # 각 실행별 디렉토리 생성
             timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
-            run_dir = os.path.join(visualizations_dir, f"dngo_{timestamp}_run{run+1:02d}")
+            run_dir = os.path.join(visualizations_dir, f"{model_type.lower()}_{timestamp}_run{run+1:02d}")
             
             if not os.path.exists(run_dir):
                 os.makedirs(run_dir, exist_ok=True)
@@ -537,13 +857,13 @@ def multiple_optimization_runs(param_space: Dict, label_maps: Dict, lookup: Dict
             # 베이지안 최적화 결과 저장
             try:
                 from ..common.result_saver import save_optimization_results
-                save_optimization_results(result, run_dir, 'dngo')
+                save_optimization_results(result, run_dir, model_type.lower())
             except ImportError:
                 # 상대 import 실패 시 절대 import 시도
                 import sys
                 sys.path.append('..')
                 from common.result_saver import save_optimization_results
-                save_optimization_results(result, run_dir, 'dngo')
+                save_optimization_results(result, run_dir, model_type.lower())
         
         if result['best_so_far'] <= min_target:
             print(f"Run {run+1}: Found target! Cost: {result['total_cost']:.2f}")

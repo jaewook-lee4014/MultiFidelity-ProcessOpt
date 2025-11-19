@@ -21,8 +21,9 @@ from common.data_utils import (
     assign_fidelities, prepare_initial_data, create_all_combinations_data,
     create_param_space
 )
+# Universal optimization using optimization_base (supports both DNGO and BNN)
 from DNGO.optimization_base import single_optimization_run, multiple_optimization_runs
-from BNN.optimization_bnn import single_optimization_run_bnn, multiple_optimization_runs_bnn
+# Legacy imports for backward compatibility with DNGO-OL
 from DNGO.optimization import single_optimization_run_dngo_ol, multiple_optimization_runs_dngo_ol
 from common.device_utils import setup_device_for_bnn, clear_mps_cache
 from common.visualization import (
@@ -31,6 +32,7 @@ from common.visualization import (
     plot_optimization_results, plot_bnn_iteration_results
 )
 from DNGO.visualization import plot_optimization_progress, plot_multiple_runs_boxplot
+from DNGO.visualization_separated import plot_optimization_progress_separated
 
 # 현재 디렉토리를 Python path에 추가
 current_dir = Path(__file__).parent
@@ -93,6 +95,24 @@ def parse_arguments():
     parser.add_argument('--data-size', choices=['small', 'medium', 'large'], default='small',
                        help='데이터 크기 (하이퍼파라미터 탐색 공간 결정)')
     
+    # 점진적 학습 옵션
+    parser.add_argument('--use-incremental-learning', action='store_true',
+                       help='점진적 학습 사용 (새 데이터에 점진적 업데이트)')
+    parser.add_argument('--incremental-mode', choices=['full', 'incremental', 'hybrid'], default='incremental',
+                       help='점진적 학습 모드 (full: 항상 전체 재학습, incremental: 항상 점진적, hybrid: 주기적 전체)')
+    parser.add_argument('--lr-boost-factor', type=float, default=2.0,
+                       help='점진적 학습 시 학습률 부스트 계수')
+    parser.add_argument('--incremental-epochs', type=int, default=10,
+                       help='점진적 학습 시 epoch 수')
+    parser.add_argument('--replay-ratio', type=float, default=0.2,
+                       help='점진적 학습 시 경험 재생 비율 (0.0~0.5)')
+    parser.add_argument('--weight-decay-factor', type=float, default=0.9,
+                       help='점진적 학습 시 가중치 감쇠 계수')
+    parser.add_argument('--full-retrain-interval', type=int, default=5,
+                       help='hybrid 모드에서 전체 재학습 주기')
+    parser.add_argument('--kl-reg-weight', type=float, default=0.1,
+                       help='BNN 점진적 학습 시 KL 정규화 가중치 (catastrophic forgetting 방지)')
+    
     # 시각화 옵션
     parser.add_argument('--save-images', action='store_true',
                        help='각 iteration마다 시각화 이미지 저장')
@@ -134,8 +154,26 @@ def parse_arguments():
                        help='결과 파일명')
     parser.add_argument('--plot-results', action='store_true',
                        help='결과 시각화')
+    parser.add_argument('--separated-viz', action='store_true',
+                       help='LOFI와 HIFI 모델을 분리하여 시각화')
     
     return parser.parse_args()
+
+
+def setup_incremental_params(args):
+    """점진적 학습 파라미터 설정"""
+    if not args.use_incremental_learning:
+        return None
+    
+    return {
+        'mode': args.incremental_mode,
+        'lr_boost_factor': args.lr_boost_factor,
+        'incremental_epochs': args.incremental_epochs,
+        'replay_ratio': args.replay_ratio,
+        'weight_decay_factor': args.weight_decay_factor,
+        'full_retrain_interval': args.full_retrain_interval,
+        'kl_reg_weight': args.kl_reg_weight  # BNN 전용
+    }
 
 
 def setup_model_config(args):
@@ -188,7 +226,7 @@ def setup_model_config(args):
         }
 
 
-def print_configuration(args, param_space, model_config):
+def print_configuration(args, param_space, model_config, incremental_params=None):
     """설정 정보 출력"""
     print("=" * 60)
     print("Transfer Learning Bayesian Optimization Configuration")
@@ -244,6 +282,23 @@ def print_configuration(args, param_space, model_config):
         print(f"\n🔧 Hyperparameter Bayesian Optimization:")
         print(f"  Enabled: No (using fixed hyperparameters)")
     
+    # 점진적 학습 설정
+    if args.use_incremental_learning and incremental_params:
+        print(f"\n🔄 Incremental Learning:")
+        print(f"  Enabled: Yes")
+        print(f"  Mode: {incremental_params['mode']}")
+        print(f"  Learning rate boost factor: {incremental_params['lr_boost_factor']}")
+        print(f"  Incremental epochs: {incremental_params['incremental_epochs']}")
+        print(f"  Replay ratio: {incremental_params['replay_ratio']}")
+        print(f"  Weight decay factor: {incremental_params['weight_decay_factor']}")
+        print(f"  Full retrain interval: {incremental_params['full_retrain_interval']}")
+        if args.model_type == 'bnn':
+            print(f"  KL regularization weight: {incremental_params['kl_reg_weight']}")
+        print(f"  ⚡ Note: Models will update incrementally on new data!")
+    else:
+        print(f"\n🔄 Incremental Learning:")
+        print(f"  Enabled: No (using full retraining)")
+    
     print("=" * 60)
 
 
@@ -260,8 +315,11 @@ def main():
     # 모델 설정
     model_config = setup_model_config(args)
     
+    # 점진적 학습 파라미터 설정
+    incremental_params = setup_incremental_params(args)
+    
     # 설정 출력
-    print_configuration(args, param_space, model_config)
+    print_configuration(args, param_space, model_config, incremental_params)
     
     # 하이퍼파라미터 BO 사용 시 경고
     if args.use_hyperparameter_bo:
@@ -298,7 +356,10 @@ def main():
                     use_hyperparameter_bo=args.use_hyperparameter_bo,
                     pretrain_bo_trials=args.pretrain_bo_trials,
                     finetune_bo_trials=args.finetune_bo_trials,
-                    data_size=args.data_size
+                    data_size=args.data_size,
+                    model_type='DNGO',
+                    use_incremental_learning=args.use_incremental_learning,
+                    incremental_params=incremental_params
                 )
             elif args.model_type == 'dngo-ol':
                 result = single_optimization_run_dngo_ol(
@@ -316,7 +377,7 @@ def main():
                     images_dir=args.images_dir
                 )
             else:  # BNN
-                result = single_optimization_run_bnn(
+                result = single_optimization_run(
                     param_space=param_space,
                     label_maps=label_maps,
                     lookup=lookup,
@@ -331,8 +392,9 @@ def main():
                     pretrain_bo_trials=args.pretrain_bo_trials,
                     finetune_bo_trials=args.finetune_bo_trials,
                     data_size=args.data_size,
-                    save_images=args.save_images,
-                    images_dir=args.images_dir
+                    model_type='BNN',
+                    use_incremental_learning=args.use_incremental_learning,
+                    incremental_params=incremental_params
                 )
             
             # 결과 출력
@@ -367,15 +429,33 @@ def main():
                     timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
                     images_dir = f"images/{args.model_type}_{timestamp}_run01"
                     print(f"📸 Creating DNGO visualizations in {images_dir}/")
-                    plot_optimization_progress(result, save_dir=images_dir)
+                    
+                    # 분리된 시각화 사용 여부
+                    if args.separated_viz:
+                        print("  Using separated LOFI/HIFI visualization...")
+                        plot_optimization_progress_separated(result, save_dir=images_dir)
+                    else:
+                        plot_optimization_progress(result, save_dir=images_dir)
+                    
                     print(f"✅ DNGO visualization completed: {images_dir}/")
                     
                     # 베이지안 최적화 결과 저장
                     from common.result_saver import save_optimization_results
                     save_optimization_results(result, images_dir, args.model_type)
                 else:
-                    # 기존 시각화 (BNN 등)
-                    plot_optimization_results(result)
+                    # BNN 시각화 (파일로 저장)
+                    from datetime import datetime
+                    timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
+                    
+                    # BNN용 시각화 디렉토리 생성
+                    images_dir = f"images/bnn_{timestamp}_run01"
+                    os.makedirs(images_dir, exist_ok=True)
+                    
+                    # plot_optimization_results를 파일로 저장
+                    summary_path = os.path.join(images_dir, 'summary.png')
+                    print(f"📸 Creating BNN visualization: {summary_path}")
+                    plot_optimization_results(result, save_path=summary_path)
+                    print(f"✅ BNN visualization completed: {summary_path}")
                 
             # BNN + MPS 사용 시 메모리 정리
             if args.model_type == 'bnn' and model_config['device'] == 'mps':
@@ -404,7 +484,10 @@ def main():
                     finetune_bo_trials=args.finetune_bo_trials,
                     data_size=args.data_size,
                     save_visualizations=args.plot_results,  # 시각화 저장 여부
-                    visualizations_dir='images'  # 시각화 저장 디렉토리
+                    visualizations_dir='images',  # 시각화 저장 디렉토리
+                    model_type='DNGO',
+                    use_incremental_learning=args.use_incremental_learning,
+                    incremental_params=incremental_params
                 )
             elif args.model_type == 'dngo-ol':
                 results = multiple_optimization_runs_dngo_ol(
@@ -421,7 +504,7 @@ def main():
                     results_filename='dngo_ol_results.csv'
                 )
             else:  # BNN
-                results = multiple_optimization_runs_bnn(
+                results = multiple_optimization_runs(
                     param_space=param_space,
                     label_maps=label_maps,
                     lookup=lookup,
@@ -432,29 +515,33 @@ def main():
                     min_target=args.min_target,
                     model_config=model_config,
                     save_results=args.save_results,
-                    results_filename=args.results_filename
+                    results_filename=args.results_filename,
+                    use_hyperparameter_bo=args.use_hyperparameter_bo,
+                    pretrain_bo_trials=args.pretrain_bo_trials,
+                    finetune_bo_trials=args.finetune_bo_trials,
+                    data_size=args.data_size,
+                    save_visualizations=args.plot_results,
+                    visualizations_dir='images',
+                    model_type='BNN',
+                    use_incremental_learning=args.use_incremental_learning,
+                    incremental_params=incremental_params
                 )
             
             # 시각화
             if args.plot_results:
                 print("Generating plots...")
-                if args.model_type in ['dngo', 'dngo-ol']:
-                    # DNGO 박스플롯 시각화
-                    from datetime import datetime
-                    timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
-                    boxplot_path = f"images/{args.model_type}_{timestamp}_boxplot_{args.num_runs}runs.png"
-                    print(f"📊 Creating DNGO boxplot: {boxplot_path}")
-                    plot_multiple_runs_boxplot(results, model_type=args.model_type.upper(), save_path=boxplot_path)
-                    print(f"✅ DNGO boxplot completed: {boxplot_path}")
-                else:
-                    # 기존 시각화 (BNN 등)
-                    import pandas as pd
-                    results_df = pd.DataFrame({
-                        'run': range(1, len(results) + 1),
-                        'total_cost': [r['total_cost'] for r in results],
-                        'best_so_far': [r['best_so_far'] for r in results]
-                    })
-                    plot_multiple_runs_summary(results_df)
+                # 모든 모델 타입에 대해 동일한 박스플롯 시각화 사용
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
+                boxplot_path = f"images/{args.model_type}_{timestamp}_boxplot_{args.num_runs}runs.png"
+                print(f"📊 Creating {args.model_type.upper()} boxplot: {boxplot_path}")
+                
+                # images 디렉토리 생성
+                import os
+                os.makedirs('images', exist_ok=True)
+                
+                plot_multiple_runs_boxplot(results, model_type=args.model_type.upper(), save_path=boxplot_path)
+                print(f"✅ {args.model_type.upper()} boxplot completed: {boxplot_path}")
                 
             # BNN + MPS 사용 시 메모리 정리
             if args.model_type == 'bnn' and model_config['device'] == 'mps':
