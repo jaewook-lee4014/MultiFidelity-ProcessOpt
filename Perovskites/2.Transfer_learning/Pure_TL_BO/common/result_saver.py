@@ -273,7 +273,7 @@ def convert_numpy_to_list(obj: Any) -> Any:
         return int(obj)
     elif isinstance(obj, (np.floating, np.float32, np.float64)):
         return float(obj)
-    elif isinstance(obj, (np.bool_, np.bool8)):
+    elif isinstance(obj, np.bool_):
         return bool(obj)
     elif isinstance(obj, dict):
         return {key: convert_numpy_to_list(value) for key, value in obj.items()}

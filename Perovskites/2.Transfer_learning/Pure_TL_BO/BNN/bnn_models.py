@@ -436,6 +436,20 @@ class TransferLearningBNN:
                 X_train, y_train, X_val, y_val = X_high, y_high, X_high, y_high
             
             # BNN 하이퍼파라미터 최적화 실행 (Optuna 사용)
+            # Pretrain에서 결정된 구조를 고정
+            if hasattr(self, 'pretrain_best_params') and 'hidden_dims' in self.pretrain_best_params:
+                hidden_dims_list = self.pretrain_best_params['hidden_dims']
+                fixed_structure = {
+                    'hidden_layers': len(hidden_dims_list),
+                    'hidden_dim': hidden_dims_list[0] if hidden_dims_list else 64
+                }
+            else:
+                # fallback: 현재 모델 구조 사용
+                fixed_structure = {
+                    'hidden_layers': len(self.hidden_dims),
+                    'hidden_dim': self.hidden_dims[0] if self.hidden_dims else 64
+                }
+
             from .hyperparameter_optimization_bnn_optuna import optimize_bnn_hyperparameters_optuna
             best_params, best_performance, history = optimize_bnn_hyperparameters_optuna(
                 X_train, y_train, X_val, y_val,
@@ -444,7 +458,8 @@ class TransferLearningBNN:
                 data_size=data_size,
                 device=self.device,
                 verbose=verbose,
-                stage='finetune'
+                stage='finetune',
+                fixed_structure=fixed_structure
             )
             
             self.finetune_best_params = best_params

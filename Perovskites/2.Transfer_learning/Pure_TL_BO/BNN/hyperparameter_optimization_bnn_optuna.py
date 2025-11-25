@@ -20,9 +20,10 @@ from tqdm import tqdm
 def create_bnn_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                                 X_val: np.ndarray, y_val: np.ndarray,
                                 input_dim: int, device: str, data_size: str, stage: str,
+                                fixed_structure: Dict = None,
                                 optimize_incremental: bool = False):
     """BNN Optuna objective function 생성"""
-    
+
     def objective(trial):
         try:
             if stage == 'pretrain':
@@ -63,22 +64,26 @@ def create_bnn_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                 return mse
                 
             else:  # finetune
-                # Finetune 단계 하이퍼파라미터
+                # Finetune 단계: 학습률, epochs, kl_weight만 탐색, 구조는 고정
+                # 구조는 pretrain에서 결정된 것 사용
+                if fixed_structure is not None:
+                    hidden_layers = fixed_structure['hidden_layers']
+                    hidden_dim = fixed_structure['hidden_dim']
+                else:
+                    # fallback: 기본 구조 사용
+                    hidden_layers = 2
+                    hidden_dim = 64
+
+                # Learning rate, epochs, kl_weight만 탐색
                 if data_size == 'small':
-                    hidden_layers = trial.suggest_int('hidden_layers', 1, 2)
-                    hidden_dim = trial.suggest_categorical('hidden_dim', [16, 32])
                     learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-3, log=True)
                     epochs = trial.suggest_int('epochs', 50, 150)
                     kl_weight = trial.suggest_float('kl_weight', 0.1, 10.0, log=True)
                 elif data_size == 'medium':
-                    hidden_layers = trial.suggest_int('hidden_layers', 1, 3)
-                    hidden_dim = trial.suggest_categorical('hidden_dim', [16, 32, 64])
                     learning_rate = trial.suggest_float('learning_rate', 1e-5, 5e-4, log=True)
                     epochs = trial.suggest_int('epochs', 75, 200)
                     kl_weight = trial.suggest_float('kl_weight', 0.1, 10.0, log=True)
                 else:  # large
-                    hidden_layers = trial.suggest_int('hidden_layers', 2, 4)
-                    hidden_dim = trial.suggest_categorical('hidden_dim', [32, 64, 128])
                     learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-4, log=True)
                     epochs = trial.suggest_int('epochs', 100, 250)
                     kl_weight = trial.suggest_float('kl_weight', 0.1, 10.0, log=True)
@@ -141,14 +146,15 @@ def optimize_bnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
                                         input_dim: int, n_trials: int = 10,
                                         data_size: str = 'small', device: str = 'cpu',
                                         verbose: bool = True, stage: str = 'pretrain',
+                                        fixed_structure: Dict = None,
                                         optimize_incremental: bool = False) -> Tuple[Dict, float, List]:
     """
     Optuna를 사용한 BNN 하이퍼파라미터 베이지안 최적화
-    
+
     Args:
         X_train: 훈련 데이터
         y_train: 훈련 라벨
-        X_val: 검증 데이터  
+        X_val: 검증 데이터
         y_val: 검증 라벨
         input_dim: 입력 차원
         n_trials: BO 시행 횟수
@@ -156,40 +162,42 @@ def optimize_bnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
         device: 디바이스
         verbose: 상세 출력
         stage: 'pretrain' 또는 'finetune'
-        
+        fixed_structure: finetune일 때 사용할 고정된 구조 {'hidden_layers': int, 'hidden_dim': int}
+
     Returns:
         최적 하이퍼파라미터, 최적 성능, 전체 기록
     """
-    
+
     # Optuna study 생성
     sampler = TPESampler(seed=42)
     pruner = MedianPruner(n_startup_trials=2, n_warmup_steps=10)
-    
+
     study = optuna.create_study(
         direction='minimize',
         sampler=sampler,
         pruner=pruner
     )
-    
+
     # Objective function 생성
-    objective = create_bnn_optuna_objective(X_train, y_train, X_val, y_val, 
-                                          input_dim, device, data_size, stage, optimize_incremental)
+    objective = create_bnn_optuna_objective(X_train, y_train, X_val, y_val,
+                                          input_dim, device, data_size, stage, fixed_structure, optimize_incremental)
     
     # 최적화 실행 with progress bar
+    stage_prefix = "Pretrain" if stage == 'pretrain' else "Finetune"
     if verbose:
         # Optuna의 verbosity 조절
         optuna.logging.set_verbosity(optuna.logging.WARNING)
-        
-        with tqdm(total=n_trials, desc="      HP-BO Progress", 
+
+        with tqdm(total=n_trials, desc=f"      {stage_prefix} HP-BO",
                   bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}') as pbar:
-            
+
             def callback(study, trial):
                 pbar.set_postfix({
                     'best_loss': f'{study.best_value:.4f}' if study.best_value != float('inf') else 'inf',
                     'current_loss': f'{trial.value:.4f}' if trial.value is not None else 'inf'
                 })
                 pbar.update(1)
-            
+
             study.optimize(objective, n_trials=n_trials, callbacks=[callback])
     else:
         optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -244,16 +252,21 @@ def optimize_bnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
             trial_history.append(record)
     
     if verbose:
-        hidden_dims_str = f"dims={best_params.get('hidden_dims', 'N/A')}"
-        lr_str = f"lr={best_params.get('learning_rate', 0):.1e}"
-        epochs_str = f"epochs={best_params.get('epochs', 0)}"
-        kl_str = f"kl={best_params.get('kl_weight', 'N/A'):.1f}" if 'kl_weight' in best_params else ""
-        
-        param_str = f"{hidden_dims_str}, {lr_str}, {epochs_str}"
-        if kl_str:
-            param_str += f", {kl_str}"
-            
-        print(f"      ✅ Best params: {param_str}")
+        if stage == 'pretrain':
+            hidden_dims_str = f"dims={best_params.get('hidden_dims', 'N/A')}"
+            lr_str = f"lr={best_params.get('learning_rate', 0):.1e}"
+            epochs_str = f"epochs={best_params.get('epochs', 0)}"
+            param_str = f"{hidden_dims_str}, {lr_str}, {epochs_str}"
+            print(f"      ✅ Best {stage_prefix} params: {param_str}")
+        else:
+            lr_str = f"lr={best_params.get('learning_rate', 0):.1e}"
+            epochs_str = f"epochs={best_params.get('epochs', 0)}"
+            kl_str = f"kl={best_params.get('kl_weight', 'N/A'):.1f}" if 'kl_weight' in best_params else ""
+            param_str = f"{lr_str}, {epochs_str}"
+            if kl_str:
+                param_str += f", {kl_str}"
+            print(f"      ✅ Best {stage_prefix} params: {param_str} (structure fixed)")
+
         print(f"      ✅ Best loss: {best_performance:.4f}")
     
     return best_params, best_performance, trial_history

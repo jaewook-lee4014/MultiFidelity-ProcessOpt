@@ -46,27 +46,45 @@ class OptunaDNN(nn.Module):
 
 def create_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                            X_val: np.ndarray, y_val: np.ndarray,
-                           input_dim: int, device: str, data_size: str, 
+                           input_dim: int, device: str, data_size: str,
+                           stage: str = 'pretrain',
+                           fixed_structure: Dict = None,
                            optimize_incremental: bool = False):
     """Optuna objective function 생성 (incremental learning 포함)"""
-    
+
     def objective(trial):
-        # 기본 하이퍼파라미터 제안
-        if data_size == 'small':
-            hidden_layers = trial.suggest_int('hidden_layers', 1, 3)
-            hidden_dim = trial.suggest_categorical('hidden_dim', [16, 32, 64, 128])
-            learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)
-            epochs = trial.suggest_int('epochs', 50, 200)
-        elif data_size == 'medium':
-            hidden_layers = trial.suggest_int('hidden_layers', 1, 4)
-            hidden_dim = trial.suggest_categorical('hidden_dim', [32, 64, 128, 256])
-            learning_rate = trial.suggest_float('learning_rate', 1e-5, 5e-3, log=True)
-            epochs = trial.suggest_int('epochs', 100, 500)
-        else:  # large
-            hidden_layers = trial.suggest_int('hidden_layers', 2, 5)
-            hidden_dim = trial.suggest_categorical('hidden_dim', [64, 128, 256, 512])
-            learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-3, log=True)
-            epochs = trial.suggest_int('epochs', 100, 1000)
+        # Stage별 하이퍼파라미터 제안
+        if stage == 'pretrain':
+            # Pretrain: 모든 파라미터 탐색
+            if data_size == 'small':
+                hidden_layers = trial.suggest_int('hidden_layers', 1, 3)
+                hidden_dim = trial.suggest_categorical('hidden_dim', [16, 32, 64, 128])
+                learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)
+                epochs = trial.suggest_int('epochs', 50, 200)
+            elif data_size == 'medium':
+                hidden_layers = trial.suggest_int('hidden_layers', 1, 4)
+                hidden_dim = trial.suggest_categorical('hidden_dim', [32, 64, 128, 256])
+                learning_rate = trial.suggest_float('learning_rate', 1e-5, 5e-3, log=True)
+                epochs = trial.suggest_int('epochs', 100, 500)
+            else:  # large
+                hidden_layers = trial.suggest_int('hidden_layers', 2, 5)
+                hidden_dim = trial.suggest_categorical('hidden_dim', [64, 128, 256, 512])
+                learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-3, log=True)
+                epochs = trial.suggest_int('epochs', 100, 1000)
+        else:
+            # Finetune: learning_rate와 epochs만 탐색, 구조는 고정
+            hidden_layers = fixed_structure['hidden_layers']
+            hidden_dim = fixed_structure['hidden_dim']
+
+            if data_size == 'small':
+                learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)
+                epochs = trial.suggest_int('epochs', 50, 200)
+            elif data_size == 'medium':
+                learning_rate = trial.suggest_float('learning_rate', 1e-5, 5e-3, log=True)
+                epochs = trial.suggest_int('epochs', 100, 500)
+            else:  # large
+                learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-3, log=True)
+                epochs = trial.suggest_int('epochs', 100, 1000)
         
         # Incremental learning 하이퍼파라미터 제안 (선택적)
         incremental_params = None
@@ -289,62 +307,68 @@ def optimize_dnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
                                         X_val: np.ndarray, y_val: np.ndarray,
                                         input_dim: int, n_trials: int = 10,
                                         data_size: str = 'small', device: str = 'cpu',
+                                        stage: str = 'pretrain',
+                                        fixed_structure: Dict = None,
                                         verbose: bool = True, optimize_incremental: bool = False) -> Tuple[Dict, float, List]:
     """
     Optuna를 사용한 DNN 하이퍼파라미터 베이지안 최적화
-    
+
     Args:
         X_train: 훈련 데이터
         y_train: 훈련 라벨
-        X_val: 검증 데이터  
+        X_val: 검증 데이터
         y_val: 검증 라벨
         input_dim: 입력 차원
         n_trials: BO 시행 횟수
         data_size: 데이터 크기 ('small', 'medium', 'large')
         device: 디바이스
+        stage: 'pretrain' 또는 'finetune' - 최적화 단계
+        fixed_structure: finetune일 때 사용할 고정된 구조 {'hidden_layers': int, 'hidden_dim': int}
         verbose: 상세 출력
-        
+
     Returns:
         최적 하이퍼파라미터, 최적 성능, 전체 기록
     """
-    
+
     # Optuna study 생성
     sampler = TPESampler(seed=42)
     pruner = MedianPruner(n_startup_trials=3, n_warmup_steps=20)
-    
+
     study = optuna.create_study(
         direction='minimize',
         sampler=sampler,
         pruner=pruner
     )
-    
-    # Objective function 생성 (incremental learning 포함)
-    objective = create_optuna_objective(X_train, y_train, X_val, y_val, input_dim, device, data_size, optimize_incremental)
+
+    # Objective function 생성 (stage 및 incremental learning 포함)
+    objective = create_optuna_objective(X_train, y_train, X_val, y_val, input_dim, device, data_size,
+                                       stage, fixed_structure, optimize_incremental)
     
     # 최적화 실행 with progress bar
+    stage_prefix = "Pretrain" if stage == 'pretrain' else "Finetune"
     if verbose:
         # Optuna의 verbosity 조절
         optuna.logging.set_verbosity(optuna.logging.WARNING)
-        
-        with tqdm(total=n_trials, desc="      HP-BO Progress", 
+
+        with tqdm(total=n_trials, desc=f"      {stage_prefix} HP-BO",
                   bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}') as pbar:
-            
+
             def callback(study, trial):
                 pbar.set_postfix({
                     'best_loss': f'{study.best_value:.4f}' if study.best_value != float('inf') else 'inf',
                     'current_loss': f'{trial.value:.4f}' if trial.value is not None else 'inf'
                 })
                 pbar.update(1)
-            
+
             study.optimize(objective, n_trials=n_trials, callbacks=[callback])
     else:
         optuna.logging.set_verbosity(optuna.logging.WARNING)
         study.optimize(objective, n_trials=n_trials)
-    
+
     # 결과 정리
     best_params = study.best_params
     best_performance = study.best_value
-    
+
     # 모든 시행 기록
     trial_history = []
     for trial in study.trials:
@@ -352,9 +376,12 @@ def optimize_dnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
             record = trial.params.copy()
             record['validation_loss'] = trial.value
             trial_history.append(record)
-    
+
     if verbose:
-        print(f"      ✅ Best params: layers={best_params['hidden_layers']}, dim={best_params['hidden_dim']}, lr={best_params['learning_rate']:.1e}, epochs={best_params['epochs']}")
+        if stage == 'pretrain':
+            print(f"      ✅ Best {stage_prefix} params: layers={best_params['hidden_layers']}, dim={best_params['hidden_dim']}, lr={best_params['learning_rate']:.1e}, epochs={best_params['epochs']}")
+        else:
+            print(f"      ✅ Best {stage_prefix} params: lr={best_params['learning_rate']:.1e}, epochs={best_params['epochs']} (structure fixed)")
         print(f"      ✅ Best loss: {best_performance:.4f}")
-    
+
     return best_params, best_performance, trial_history

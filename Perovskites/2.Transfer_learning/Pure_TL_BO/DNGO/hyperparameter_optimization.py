@@ -26,12 +26,15 @@ warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 
 class HyperparameterSpace:
     """하이퍼파라미터 탐색 공간 정의"""
-    
-    def __init__(self, data_size: int = 'small'):
+
+    def __init__(self, data_size: int = 'small', stage: str = 'pretrain'):
         """
         Args:
             data_size: 'small', 'medium', 'large' - 데이터 크기에 따른 탐색 공간 조정
+            stage: 'pretrain' 또는 'finetune' - 탐색 단계
         """
+        self.stage = stage
+
         if data_size == 'small':
             # 작은 데이터셋용 (적은 파라미터)
             self.hidden_layers = [1, 2, 3]  # 레이어 수
@@ -48,72 +51,129 @@ class HyperparameterSpace:
             self.hidden_dims = [64, 128, 256, 512]
             self.learning_rates = [1e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3]
             self.epochs_range = (100, 1000)
+
+        # Finetune 단계에서는 고정된 구조 사용 (나중에 설정됨)
+        if stage == 'finetune':
+            self.fixed_hidden_layers = None
+            self.fixed_hidden_dim = None
     
+    def set_fixed_structure(self, hidden_layers: int, hidden_dim: int):
+        """Finetune 단계에서 고정된 구조 설정"""
+        if self.stage == 'finetune':
+            self.fixed_hidden_layers = hidden_layers
+            self.fixed_hidden_dim = hidden_dim
+
     def sample_random(self) -> Dict:
         """랜덤 하이퍼파라미터 샘플링"""
-        return {
-            'hidden_layers': np.random.choice(self.hidden_layers),
-            'hidden_dim': np.random.choice(self.hidden_dims),
-            'learning_rate': np.random.choice(self.learning_rates),
-            'epochs': np.random.randint(self.epochs_range[0], self.epochs_range[1] + 1)
-        }
+        if self.stage == 'pretrain':
+            # Pretrain: 모든 파라미터 탐색
+            return {
+                'hidden_layers': np.random.choice(self.hidden_layers),
+                'hidden_dim': np.random.choice(self.hidden_dims),
+                'learning_rate': np.random.choice(self.learning_rates),
+                'epochs': np.random.randint(self.epochs_range[0], self.epochs_range[1] + 1)
+            }
+        else:
+            # Finetune: 학습률과 epochs만 탐색, 구조는 고정
+            return {
+                'hidden_layers': self.fixed_hidden_layers,
+                'hidden_dim': self.fixed_hidden_dim,
+                'learning_rate': np.random.choice(self.learning_rates),
+                'epochs': np.random.randint(self.epochs_range[0], self.epochs_range[1] + 1)
+            }
     
     def normalize_params(self, params: Dict) -> np.ndarray:
         """하이퍼파라미터를 [0,1] 범위로 정규화"""
-        normalized = np.zeros(4)
-        
-        # hidden_layers 정규화
-        normalized[0] = (params['hidden_layers'] - min(self.hidden_layers)) / \
-                       (max(self.hidden_layers) - min(self.hidden_layers))
-        
-        # hidden_dim 정규화 (log scale)
-        log_dims = np.log2(self.hidden_dims)
-        log_param = np.log2(params['hidden_dim'])
-        normalized[1] = (log_param - min(log_dims)) / (max(log_dims) - min(log_dims))
-        
-        # learning_rate 정규화 (log scale)
-        log_lrs = np.log10(self.learning_rates)
-        log_lr = np.log10(params['learning_rate'])
-        normalized[2] = (log_lr - min(log_lrs)) / (max(log_lrs) - min(log_lrs))
-        
-        # epochs 정규화
-        normalized[3] = (params['epochs'] - self.epochs_range[0]) / \
-                       (self.epochs_range[1] - self.epochs_range[0])
-        
+        if self.stage == 'pretrain':
+            # Pretrain: 모든 파라미터 정규화 (4차원)
+            normalized = np.zeros(4)
+
+            # hidden_layers 정규화
+            normalized[0] = (params['hidden_layers'] - min(self.hidden_layers)) / \
+                           (max(self.hidden_layers) - min(self.hidden_layers))
+
+            # hidden_dim 정규화 (log scale)
+            log_dims = np.log2(self.hidden_dims)
+            log_param = np.log2(params['hidden_dim'])
+            normalized[1] = (log_param - min(log_dims)) / (max(log_dims) - min(log_dims))
+
+            # learning_rate 정규화 (log scale)
+            log_lrs = np.log10(self.learning_rates)
+            log_lr = np.log10(params['learning_rate'])
+            normalized[2] = (log_lr - min(log_lrs)) / (max(log_lrs) - min(log_lrs))
+
+            # epochs 정규화
+            normalized[3] = (params['epochs'] - self.epochs_range[0]) / \
+                           (self.epochs_range[1] - self.epochs_range[0])
+        else:
+            # Finetune: learning_rate와 epochs만 정규화 (2차원)
+            normalized = np.zeros(2)
+
+            # learning_rate 정규화 (log scale)
+            log_lrs = np.log10(self.learning_rates)
+            log_lr = np.log10(params['learning_rate'])
+            normalized[0] = (log_lr - min(log_lrs)) / (max(log_lrs) - min(log_lrs))
+
+            # epochs 정규화
+            normalized[1] = (params['epochs'] - self.epochs_range[0]) / \
+                           (self.epochs_range[1] - self.epochs_range[0])
+
         return normalized
     
     def denormalize_params(self, normalized: np.ndarray) -> Dict:
         """정규화된 값을 실제 하이퍼파라미터로 변환"""
-        # hidden_layers
-        layers_range = max(self.hidden_layers) - min(self.hidden_layers)
-        layers = int(min(self.hidden_layers) + normalized[0] * layers_range)
-        layers = max(min(self.hidden_layers), min(max(self.hidden_layers), layers))
-        
-        # hidden_dim (가장 가까운 값 선택)
-        log_dims = np.log2(self.hidden_dims)
-        log_range = max(log_dims) - min(log_dims)
-        target_log = min(log_dims) + normalized[1] * log_range
-        dim_idx = np.argmin(np.abs(log_dims - target_log))
-        hidden_dim = self.hidden_dims[dim_idx]
-        
-        # learning_rate (가장 가까운 값 선택)
-        log_lrs = np.log10(self.learning_rates)
-        log_range = max(log_lrs) - min(log_lrs)
-        target_log = min(log_lrs) + normalized[2] * log_range
-        lr_idx = np.argmin(np.abs(log_lrs - target_log))
-        learning_rate = self.learning_rates[lr_idx]
-        
-        # epochs
-        epochs = int(self.epochs_range[0] + normalized[3] * 
-                    (self.epochs_range[1] - self.epochs_range[0]))
-        epochs = max(self.epochs_range[0], min(self.epochs_range[1], epochs))
-        
-        return {
-            'hidden_layers': layers,
-            'hidden_dim': hidden_dim,
-            'learning_rate': learning_rate,
-            'epochs': epochs
-        }
+        if self.stage == 'pretrain':
+            # Pretrain: 모든 파라미터 비정규화 (4차원 입력)
+            # hidden_layers
+            layers_range = max(self.hidden_layers) - min(self.hidden_layers)
+            layers = int(min(self.hidden_layers) + normalized[0] * layers_range)
+            layers = max(min(self.hidden_layers), min(max(self.hidden_layers), layers))
+
+            # hidden_dim (가장 가까운 값 선택)
+            log_dims = np.log2(self.hidden_dims)
+            log_range = max(log_dims) - min(log_dims)
+            target_log = min(log_dims) + normalized[1] * log_range
+            dim_idx = np.argmin(np.abs(log_dims - target_log))
+            hidden_dim = self.hidden_dims[dim_idx]
+
+            # learning_rate (가장 가까운 값 선택)
+            log_lrs = np.log10(self.learning_rates)
+            log_range = max(log_lrs) - min(log_lrs)
+            target_log = min(log_lrs) + normalized[2] * log_range
+            lr_idx = np.argmin(np.abs(log_lrs - target_log))
+            learning_rate = self.learning_rates[lr_idx]
+
+            # epochs
+            epochs = int(self.epochs_range[0] + normalized[3] *
+                        (self.epochs_range[1] - self.epochs_range[0]))
+            epochs = max(self.epochs_range[0], min(self.epochs_range[1], epochs))
+
+            return {
+                'hidden_layers': layers,
+                'hidden_dim': hidden_dim,
+                'learning_rate': learning_rate,
+                'epochs': epochs
+            }
+        else:
+            # Finetune: learning_rate와 epochs만 비정규화 (2차원 입력)
+            # learning_rate (가장 가까운 값 선택)
+            log_lrs = np.log10(self.learning_rates)
+            log_range = max(log_lrs) - min(log_lrs)
+            target_log = min(log_lrs) + normalized[0] * log_range
+            lr_idx = np.argmin(np.abs(log_lrs - target_log))
+            learning_rate = self.learning_rates[lr_idx]
+
+            # epochs
+            epochs = int(self.epochs_range[0] + normalized[1] *
+                        (self.epochs_range[1] - self.epochs_range[0]))
+            epochs = max(self.epochs_range[0], min(self.epochs_range[1], epochs))
+
+            return {
+                'hidden_layers': self.fixed_hidden_layers,
+                'hidden_dim': self.fixed_hidden_dim,
+                'learning_rate': learning_rate,
+                'epochs': epochs
+            }
 
 
 class DynamicDNN(nn.Module):
@@ -160,17 +220,20 @@ class DynamicDNN(nn.Module):
 
 class HyperparameterBO:
     """하이퍼파라미터 베이지안 최적화"""
-    
+
     def __init__(self, param_space: HyperparameterSpace, n_initial: int = 5):
         self.param_space = param_space
         self.n_initial = n_initial
         self.X_observed = []  # 정규화된 하이퍼파라미터
         self.y_observed = []  # 성능 (음수로 저장, 최소화 문제로 변환)
         self.param_history = []  # 실제 하이퍼파라미터 기록
-        
+
+        # Stage에 따른 차원 설정
+        self.n_dims = 4 if param_space.stage == 'pretrain' else 2
+
         # GP 모델 - length_scale 범위를 넓게 설정하여 경고 방지
         kernel = Matern(
-            length_scale=0.5, 
+            length_scale=0.5,
             length_scale_bounds=(1e-3, 1e3),  # 더 넓은 범위로 설정
             nu=2.5
         )
@@ -249,17 +312,17 @@ class HyperparameterBO:
         """Acquisition function 최적화"""
         best_ei = -np.inf
         best_x = None
-        
+
         # 여러 시작점에서 최적화
         for _ in range(20):
-            x0 = np.random.uniform(0, 1, 4)
-            
+            x0 = np.random.uniform(0, 1, self.n_dims)
+
             def neg_acquisition(x):
                 return -self._acquisition_function(x.reshape(1, -1))[0]
-            
+
             # 제약 조건: [0, 1] 범위
-            bounds = [(0, 1) for _ in range(4)]
-            
+            bounds = [(0, 1) for _ in range(self.n_dims)]
+
             try:
                 result = minimize(neg_acquisition, x0, bounds=bounds, method='L-BFGS-B')
                 if result.success and -result.fun > best_ei:
@@ -267,11 +330,11 @@ class HyperparameterBO:
                     best_x = result.x
             except:
                 continue
-        
+
         if best_x is None:
             # 최적화 실패 시 랜덤 샘플링
-            best_x = np.random.uniform(0, 1, 4)
-        
+            best_x = np.random.uniform(0, 1, self.n_dims)
+
         return best_x
     
     def suggest_hyperparameters(self, X_train: np.ndarray, y_train: np.ndarray,
@@ -328,46 +391,62 @@ def optimize_dnn_hyperparameters(X_train: np.ndarray, y_train: np.ndarray,
                                 X_val: np.ndarray, y_val: np.ndarray,
                                 input_dim: int, n_trials: int = 10,
                                 data_size: str = 'small', device: str = 'cpu',
+                                stage: str = 'pretrain',
+                                fixed_structure: Dict = None,
                                 verbose: bool = True) -> Tuple[Dict, float, List]:
     """
     DNN 하이퍼파라미터 베이지안 최적화
-    
+
     Args:
         X_train: 훈련 데이터
         y_train: 훈련 라벨
-        X_val: 검증 데이터  
+        X_val: 검증 데이터
         y_val: 검증 라벨
         input_dim: 입력 차원
         n_trials: BO 시행 횟수
         data_size: 데이터 크기 ('small', 'medium', 'large')
         device: 디바이스
+        stage: 'pretrain' 또는 'finetune' - 최적화 단계
+        fixed_structure: finetune일 때 사용할 고정된 구조 {'hidden_layers': int, 'hidden_dim': int}
         verbose: 상세 출력
-        
+
     Returns:
         최적 하이퍼파라미터, 최적 성능, 전체 기록
     """
     # 하이퍼파라미터 공간 및 BO 초기화
-    param_space = HyperparameterSpace(data_size)
+    param_space = HyperparameterSpace(data_size, stage=stage)
+
+    # Finetune 단계에서는 고정된 구조 설정
+    if stage == 'finetune' and fixed_structure is not None:
+        param_space.set_fixed_structure(
+            fixed_structure['hidden_layers'],
+            fixed_structure['hidden_dim']
+        )
+
     bo = HyperparameterBO(param_space, n_initial=min(3, n_trials))
-    
+
     # 베이지안 최적화 실행 with progress bar
-    with tqdm(total=n_trials, desc="      HP-BO Progress", disable=not verbose, 
+    stage_prefix = "Pretrain" if stage == 'pretrain' else "Finetune"
+    with tqdm(total=n_trials, desc=f"      {stage_prefix} HP-BO", disable=not verbose,
               bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}') as pbar:
         for trial in range(n_trials):
             params, performance = bo.suggest_hyperparameters(
                 X_train, y_train, X_val, y_val, input_dim, device, verbose=False
             )
-            
+
             # Update progress bar with current best
             best_so_far = np.min(bo.y_observed) if bo.y_observed else performance
             pbar.set_postfix({'best_loss': f'{best_so_far:.4f}', 'current_loss': f'{performance:.4f}'})
             pbar.update(1)
-    
+
     # 최적 결과 반환
     best_params, best_performance = bo.get_best_hyperparameters()
-    
+
     if verbose:
-        print(f"      ✅ Best params: layers={best_params['hidden_layers']}, dim={best_params['hidden_dim']}, lr={best_params['learning_rate']}, epochs={best_params['epochs']}")
+        if stage == 'pretrain':
+            print(f"      ✅ Best {stage_prefix} params: layers={best_params['hidden_layers']}, dim={best_params['hidden_dim']}, lr={best_params['learning_rate']}, epochs={best_params['epochs']}")
+        else:
+            print(f"      ✅ Best {stage_prefix} params: lr={best_params['learning_rate']}, epochs={best_params['epochs']} (structure fixed)")
         print(f"      ✅ Best loss: {best_performance:.4f}")
-    
+
     return best_params, best_performance, bo.param_history 

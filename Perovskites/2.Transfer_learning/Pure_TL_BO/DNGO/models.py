@@ -117,14 +117,15 @@ class TransferLearningDNN:
             # 검증 데이터 분할
             X_train, y_train, X_val, y_val = self._split_validation_data(X_low, y_low)
             
-            # BO 실행 (Optuna 사용)
+            # BO 실행 (Optuna 사용) - Pretrain 단계: 모든 파라미터 탐색
             from .hyperparameter_optimization_optuna import optimize_dnn_hyperparameters_optuna
             best_params, best_performance, history = optimize_dnn_hyperparameters_optuna(
-                X_train, y_train, X_val, y_val, 
+                X_train, y_train, X_val, y_val,
                 input_dim=self.input_dim,
                 n_trials=bo_trials,
                 data_size=data_size,
                 device=self.device,
+                stage='pretrain',
                 verbose=verbose
             )
             
@@ -191,7 +192,16 @@ class TransferLearningDNN:
             # BO 실행 (feature를 입력으로 사용)
             X_train_features = self.extract_features(X_train)
             X_val_features = self.extract_features(X_val)
-            
+
+            # Pretrain에서 결정된 구조를 고정
+            fixed_structure = {
+                'hidden_layers': self.pretrain_best_params.get('hidden_layers', 2),
+                'hidden_dim': self.pretrain_best_params.get('hidden_dim', self.hidden_dim)
+            } if hasattr(self, 'pretrain_best_params') else {
+                'hidden_layers': 2,
+                'hidden_dim': feature_dim
+            }
+
             from .hyperparameter_optimization_optuna import optimize_dnn_hyperparameters_optuna
             best_params, best_performance, history = optimize_dnn_hyperparameters_optuna(
                 X_train_features, y_train, X_val_features, y_val,
@@ -199,6 +209,8 @@ class TransferLearningDNN:
                 n_trials=bo_trials,
                 data_size=data_size,
                 device=self.device,
+                stage='finetune',
+                fixed_structure=fixed_structure,
                 verbose=verbose
             )
             
