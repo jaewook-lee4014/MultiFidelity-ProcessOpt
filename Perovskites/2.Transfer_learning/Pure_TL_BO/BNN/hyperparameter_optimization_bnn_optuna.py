@@ -3,6 +3,10 @@ Optuna 기반 BNN 하이퍼파라미터 베이지안 최적화 모듈
 
 Pretrain과 Finetune 단계에서 각각 Optuna를 통해
 최적의 BNN 하이퍼파라미터를 찾습니다.
+
+개선 사항:
+- LOOCV (Leave-One-Out Cross Validation) 지원
+- BO-Aware Objective: 불확실성 calibration (L_uncertainty) 지원
 """
 
 import numpy as np
@@ -13,16 +17,210 @@ import optuna
 from optuna.pruners import MedianPruner
 from optuna.samplers import TPESampler
 from .bnn_models import TransferLearningBNN
+from scipy.stats import spearmanr
 import time
 from tqdm import tqdm
+
+
+def compute_uncertainty_loss(errors: np.ndarray, uncertainties: np.ndarray) -> float:
+    """
+    불확실성 calibration 손실 계산 (Error-Uncertainty Correlation)
+
+    L_uncertainty = 1 - Spearman_Correlation(|errors|, uncertainties)
+
+    Args:
+        errors: 예측 오차 배열 |y_pred - y_true|
+        uncertainties: 예측 불확실성 배열 (표준편차)
+
+    Returns:
+        L_uncertainty: [0, 2] 범위
+        - 0: 완벽한 calibration
+        - 1: 상관관계 없음
+        - 2: 역상관 (최악)
+    """
+    if len(errors) < 3:
+        return 0.0
+
+    if np.std(errors) < 1e-8 or np.std(uncertainties) < 1e-8:
+        return 1.0
+
+    correlation, _ = spearmanr(errors, uncertainties)
+
+    if np.isnan(correlation):
+        return 1.0
+
+    return 1.0 - correlation
+
+
+def evaluate_bnn_with_loocv(X: np.ndarray, y: np.ndarray,
+                            hidden_dims: List[int], device: str,
+                            pretrain_epochs: int, pretrain_lr: float,
+                            finetune_epochs: int = 0, finetune_lr: float = 1e-4,
+                            kl_weight: float = 1.0,
+                            use_uncertainty_loss: bool = False,
+                            uncertainty_weight: float = 0.3,
+                            stage: str = 'pretrain') -> float:
+    """
+    LOOCV를 사용한 BNN 모델 평가
+
+    Args:
+        X: 전체 입력 데이터
+        y: 전체 출력 데이터
+        hidden_dims: hidden layer dimensions
+        device: 디바이스
+        pretrain_epochs: pretrain epoch 수
+        pretrain_lr: pretrain 학습률
+        finetune_epochs: finetune epoch 수 (finetune stage에서만)
+        finetune_lr: finetune 학습률
+        kl_weight: KL divergence 가중치
+        use_uncertainty_loss: 불확실성 손실 사용 여부
+        uncertainty_weight: 불확실성 손실 가중치
+        stage: 'pretrain' 또는 'finetune'
+
+    Returns:
+        평균 검증 손실
+    """
+    n = len(X)
+    predictions = np.zeros(n)
+    uncertainties = np.zeros(n)
+
+    # LOOCV epoch 수 감소 (n번 반복하므로)
+    reduced_pretrain_epochs = max(pretrain_epochs // 3, 30)
+    reduced_finetune_epochs = max(finetune_epochs // 3, 20) if finetune_epochs > 0 else 0
+
+    for i in range(n):
+        # Leave-One-Out
+        X_train = np.delete(X, i, axis=0)
+        y_train = np.delete(y, i, axis=0)
+        X_val = X[i:i+1]
+
+        # BNN 모델 생성
+        bnn = TransferLearningBNN(
+            input_dim=X.shape[1],
+            hidden_dims=hidden_dims,
+            device=device
+        )
+
+        # Pretrain
+        bnn.pretrain(X_train, y_train, epochs=reduced_pretrain_epochs, lr=pretrain_lr, verbose=False)
+
+        # Finetune (stage가 finetune일 때만)
+        if stage == 'finetune' and reduced_finetune_epochs > 0:
+            bnn.finetune(X_train, y_train, epochs=reduced_finetune_epochs, lr=finetune_lr,
+                        kl_weight=kl_weight, verbose=False)
+
+        # 예측 (불확실성 포함)
+        pred_mean, pred_std = bnn.predict(X_val, n_samples=30)
+        predictions[i] = pred_mean[0]
+        uncertainties[i] = pred_std[0]
+
+    # MSE 계산
+    errors = np.abs(predictions - y)
+    mse = np.mean(errors ** 2)
+
+    # 불확실성 손실 계산 (선택적)
+    if use_uncertainty_loss and n >= 5:
+        l_uncertainty = compute_uncertainty_loss(errors, uncertainties)
+        mse_normalized = mse / (np.var(y) + 1e-8)
+        total_loss = (1 - uncertainty_weight) * mse_normalized + uncertainty_weight * l_uncertainty
+        return total_loss
+
+    return mse
+
+
+def evaluate_bnn_with_train_val_split(X_train: np.ndarray, y_train: np.ndarray,
+                                       X_val: np.ndarray, y_val: np.ndarray,
+                                       hidden_dims: List[int], device: str,
+                                       pretrain_epochs: int, pretrain_lr: float,
+                                       finetune_epochs: int = 0, finetune_lr: float = 1e-4,
+                                       kl_weight: float = 1.0,
+                                       use_uncertainty_loss: bool = False,
+                                       uncertainty_weight: float = 0.3,
+                                       stage: str = 'pretrain') -> float:
+    """
+    기존 Train/Val 분할을 사용한 BNN 모델 평가
+
+    Args:
+        X_train, y_train: 훈련 데이터
+        X_val, y_val: 검증 데이터
+        hidden_dims: hidden layer dimensions
+        device: 디바이스
+        pretrain_epochs: pretrain epoch 수
+        pretrain_lr: pretrain 학습률
+        finetune_epochs: finetune epoch 수
+        finetune_lr: finetune 학습률
+        kl_weight: KL divergence 가중치
+        use_uncertainty_loss: 불확실성 손실 사용 여부
+        uncertainty_weight: 불확실성 손실 가중치
+        stage: 'pretrain' 또는 'finetune'
+
+    Returns:
+        검증 손실
+    """
+    # BNN 모델 생성
+    bnn = TransferLearningBNN(
+        input_dim=X_train.shape[1],
+        hidden_dims=hidden_dims,
+        device=device
+    )
+
+    # Pretrain
+    bnn.pretrain(X_train, y_train, epochs=pretrain_epochs, lr=pretrain_lr, verbose=False)
+
+    # Finetune (stage가 finetune일 때만)
+    if stage == 'finetune' and finetune_epochs > 0:
+        bnn.finetune(X_train, y_train, epochs=finetune_epochs, lr=finetune_lr,
+                    kl_weight=kl_weight, verbose=False)
+
+    # 예측
+    pred_mean, pred_std = bnn.predict(X_val, n_samples=30)
+    y_val_np = y_val.flatten()
+
+    # MSE 계산
+    errors = np.abs(pred_mean - y_val_np)
+    mse = np.mean(errors ** 2)
+
+    # 불확실성 손실 계산 (선택적)
+    if use_uncertainty_loss and len(X_val) >= 3:
+        l_uncertainty = compute_uncertainty_loss(errors, pred_std)
+        mse_normalized = mse / (np.var(y_val_np) + 1e-8)
+        total_loss = (1 - uncertainty_weight) * mse_normalized + uncertainty_weight * l_uncertainty
+        return total_loss
+
+    return mse
 
 
 def create_bnn_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                                 X_val: np.ndarray, y_val: np.ndarray,
                                 input_dim: int, device: str, data_size: str, stage: str,
                                 fixed_structure: Dict = None,
-                                optimize_incremental: bool = False):
-    """BNN Optuna objective function 생성"""
+                                optimize_incremental: bool = False,
+                                use_loocv: bool = False,
+                                use_uncertainty_loss: bool = False,
+                                uncertainty_weight: float = 0.3):
+    """
+    BNN Optuna objective function 생성
+
+    Args:
+        X_train, y_train: 훈련 데이터
+        X_val, y_val: 검증 데이터 (use_loocv=False일 때 사용)
+        input_dim: 입력 차원
+        device: 디바이스
+        data_size: 데이터 크기
+        stage: 'pretrain' 또는 'finetune'
+        fixed_structure: finetune시 고정할 구조
+        optimize_incremental: incremental learning 최적화 여부
+        use_loocv: LOOCV 사용 여부
+        use_uncertainty_loss: 불확실성 calibration 손실 사용 여부
+        uncertainty_weight: 불확실성 손실 가중치
+    """
+    # LOOCV 사용 시 전체 데이터 병합
+    if use_loocv:
+        X_all = np.vstack([X_train, X_val])
+        y_all = np.concatenate([y_train, y_val])
+    else:
+        X_all = None
+        y_all = None
 
     def objective(trial):
         try:
@@ -43,34 +241,36 @@ def create_bnn_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                     hidden_dim = trial.suggest_categorical('hidden_dim', [64, 128, 256])
                     learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-3, log=True)
                     epochs = trial.suggest_int('epochs', 200, 400)
-                
-                # 동적으로 hidden_dims 생성
+
                 hidden_dims = [hidden_dim] * hidden_layers
-                
-                # BNN 모델 생성
-                bnn = TransferLearningBNN(
-                    input_dim=input_dim,
-                    hidden_dims=hidden_dims,
-                    device=device
-                )
-                
-                # Pretrain
-                bnn.pretrain(X_train, y_train, epochs=epochs, lr=learning_rate, verbose=False)
-                
-                # 검증 평가
-                pred_mean, pred_std = bnn.predict(X_val, n_samples=30)
-                mse = np.mean((pred_mean - y_val) ** 2)
-                
-                return mse
-                
+
+                # 평가 방법 선택
+                if use_loocv and X_all is not None:
+                    val_loss = evaluate_bnn_with_loocv(
+                        X_all, y_all, hidden_dims, device,
+                        pretrain_epochs=epochs, pretrain_lr=learning_rate,
+                        use_uncertainty_loss=use_uncertainty_loss,
+                        uncertainty_weight=uncertainty_weight,
+                        stage='pretrain'
+                    )
+                else:
+                    val_loss = evaluate_bnn_with_train_val_split(
+                        X_train, y_train, X_val, y_val,
+                        hidden_dims, device,
+                        pretrain_epochs=epochs, pretrain_lr=learning_rate,
+                        use_uncertainty_loss=use_uncertainty_loss,
+                        uncertainty_weight=uncertainty_weight,
+                        stage='pretrain'
+                    )
+
+                return val_loss
+
             else:  # finetune
                 # Finetune 단계: 학습률, epochs, kl_weight만 탐색, 구조는 고정
-                # 구조는 pretrain에서 결정된 것 사용
                 if fixed_structure is not None:
                     hidden_layers = fixed_structure['hidden_layers']
                     hidden_dim = fixed_structure['hidden_dim']
                 else:
-                    # fallback: 기본 구조 사용
                     hidden_layers = 2
                     hidden_dim = 64
 
@@ -87,10 +287,10 @@ def create_bnn_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                     learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-4, log=True)
                     epochs = trial.suggest_int('epochs', 100, 250)
                     kl_weight = trial.suggest_float('kl_weight', 0.1, 10.0, log=True)
-                
-                # Incremental learning 파라미터 (finetune에서만)
+
+                # Incremental learning 파라미터 (finetune에서만, 향후 사용)
                 if optimize_incremental:
-                    incremental_mode = trial.suggest_categorical('incremental_mode', 
+                    incremental_mode = trial.suggest_categorical('incremental_mode',
                                                                 ['full', 'incremental', 'hybrid'])
                     lr_boost_factor = trial.suggest_float('lr_boost_factor', 1.0, 5.0)
                     incremental_epochs = trial.suggest_int('incremental_epochs', 5, 30)
@@ -98,46 +298,37 @@ def create_bnn_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                     weight_decay_factor = trial.suggest_float('weight_decay_factor', 0.8, 1.0)
                     full_retrain_interval = trial.suggest_int('full_retrain_interval', 3, 10)
                     kl_reg_weight = trial.suggest_float('kl_reg_weight', 0.01, 1.0, log=True)
-                
-                # 동적으로 hidden_dims 생성
+
                 hidden_dims = [hidden_dim] * hidden_layers
-                
-                # BNN 모델 생성 (pretrain은 간단하게)
-                bnn = TransferLearningBNN(
-                    input_dim=input_dim,
-                    hidden_dims=[64],  # pretrain은 고정
-                    device=device
-                )
-                
-                # 간단한 pretrain (finetune 최적화에 집중)
-                bnn.pretrain(X_train, y_train, epochs=100, lr=1e-3, verbose=False)
-                
-                # Finetune with optimized parameters
-                bnn.finetune(X_train, y_train, 
-                           epochs=epochs, lr=learning_rate, 
-                           kl_weight=kl_weight, verbose=False)
-                
-                # 검증 평가 (MSE + 불확실성 품질)
-                pred_mean, pred_std = bnn.predict(X_val, n_samples=30)
-                mse = np.mean((pred_mean - y_val) ** 2)
-                
-                # 불확실성 품질 평가
-                errors = np.abs(pred_mean - y_val)
-                if len(errors) > 1 and np.std(pred_std) > 1e-8:
-                    uncertainty_quality = np.corrcoef(errors, pred_std)[0, 1]
-                    if np.isnan(uncertainty_quality):
-                        uncertainty_quality = 0
+
+                # 평가 방법 선택
+                if use_loocv and X_all is not None:
+                    val_loss = evaluate_bnn_with_loocv(
+                        X_all, y_all, hidden_dims, device,
+                        pretrain_epochs=100, pretrain_lr=1e-3,  # pretrain은 고정
+                        finetune_epochs=epochs, finetune_lr=learning_rate,
+                        kl_weight=kl_weight,
+                        use_uncertainty_loss=use_uncertainty_loss,
+                        uncertainty_weight=uncertainty_weight,
+                        stage='finetune'
+                    )
                 else:
-                    uncertainty_quality = 0
-                
-                # 점수: MSE 중심, 좋은 불확실성은 보너스
-                score = mse - 0.1 * max(0, uncertainty_quality)
-                
-                return score
-                
+                    val_loss = evaluate_bnn_with_train_val_split(
+                        X_train, y_train, X_val, y_val,
+                        hidden_dims, device,
+                        pretrain_epochs=100, pretrain_lr=1e-3,  # pretrain은 고정
+                        finetune_epochs=epochs, finetune_lr=learning_rate,
+                        kl_weight=kl_weight,
+                        use_uncertainty_loss=use_uncertainty_loss,
+                        uncertainty_weight=uncertainty_weight,
+                        stage='finetune'
+                    )
+
+                return val_loss
+
         except Exception as e:
             return float('inf')
-    
+
     return objective
 
 
@@ -147,7 +338,10 @@ def optimize_bnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
                                         data_size: str = 'small', device: str = 'cpu',
                                         verbose: bool = True, stage: str = 'pretrain',
                                         fixed_structure: Dict = None,
-                                        optimize_incremental: bool = False) -> Tuple[Dict, float, List]:
+                                        optimize_incremental: bool = False,
+                                        use_loocv: bool = False,
+                                        use_uncertainty_loss: bool = False,
+                                        uncertainty_weight: float = 0.3) -> Tuple[Dict, float, List]:
     """
     Optuna를 사용한 BNN 하이퍼파라미터 베이지안 최적화
 
@@ -163,6 +357,10 @@ def optimize_bnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
         verbose: 상세 출력
         stage: 'pretrain' 또는 'finetune'
         fixed_structure: finetune일 때 사용할 고정된 구조 {'hidden_layers': int, 'hidden_dim': int}
+        optimize_incremental: incremental learning 최적화 여부
+        use_loocv: LOOCV 사용 여부 (기본: False, 기존 Train/Val 분할)
+        use_uncertainty_loss: 불확실성 calibration 손실 사용 여부 (기본: False, 기존 MSE만)
+        uncertainty_weight: 불확실성 손실 가중치 (기본: 0.3)
 
     Returns:
         최적 하이퍼파라미터, 최적 성능, 전체 기록
@@ -170,7 +368,11 @@ def optimize_bnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
 
     # Optuna study 생성
     sampler = TPESampler(seed=42)
-    pruner = MedianPruner(n_startup_trials=2, n_warmup_steps=10)
+    # LOOCV 사용 시 pruning 비활성화
+    if use_loocv:
+        pruner = optuna.pruners.NopPruner()
+    else:
+        pruner = MedianPruner(n_startup_trials=2, n_warmup_steps=10)
 
     study = optuna.create_study(
         direction='minimize',
@@ -179,16 +381,26 @@ def optimize_bnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
     )
 
     # Objective function 생성
-    objective = create_bnn_optuna_objective(X_train, y_train, X_val, y_val,
-                                          input_dim, device, data_size, stage, fixed_structure, optimize_incremental)
-    
+    objective = create_bnn_optuna_objective(
+        X_train, y_train, X_val, y_val,
+        input_dim, device, data_size, stage, fixed_structure, optimize_incremental,
+        use_loocv=use_loocv,
+        use_uncertainty_loss=use_uncertainty_loss,
+        uncertainty_weight=uncertainty_weight
+    )
+
     # 최적화 실행 with progress bar
     stage_prefix = "Pretrain" if stage == 'pretrain' else "Finetune"
+
+    # 평가 방법 문자열 생성
+    eval_method = "LOOCV" if use_loocv else "Train/Val"
+    loss_type = f"MSE+Unc(w={uncertainty_weight})" if use_uncertainty_loss else "MSE"
+
     if verbose:
         # Optuna의 verbosity 조절
         optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-        with tqdm(total=n_trials, desc=f"      {stage_prefix} HP-BO",
+        with tqdm(total=n_trials, desc=f"      {stage_prefix} HP-BO ({eval_method}, {loss_type})",
                   bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}') as pbar:
 
             def callback(study, trial):
@@ -267,6 +479,6 @@ def optimize_bnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
                 param_str += f", {kl_str}"
             print(f"      ✅ Best {stage_prefix} params: {param_str} (structure fixed)")
 
-        print(f"      ✅ Best loss: {best_performance:.4f}")
-    
+        print(f"      ✅ Best loss: {best_performance:.4f} (eval: {eval_method}, loss: {loss_type})")
+
     return best_params, best_performance, trial_history

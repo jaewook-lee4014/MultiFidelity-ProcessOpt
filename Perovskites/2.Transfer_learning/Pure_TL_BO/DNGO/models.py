@@ -91,11 +91,12 @@ class TransferLearningDNN:
         )
         return X_train, y_train, X_val, y_val
 
-    def pretrain(self, X_low, y_low, epochs=50, lr=1e-3, verbose=False, 
-                 bo_trials=None, data_size='small'):
+    def pretrain(self, X_low, y_low, epochs=50, lr=1e-3, verbose=False,
+                 bo_trials=None, data_size='small',
+                 use_loocv=False, use_uncertainty_loss=False, uncertainty_weight=0.3):
         """
         Low-fidelity 데이터로 pretrain
-        
+
         Args:
             X_low: low-fidelity 입력 데이터
             y_low: low-fidelity 출력 데이터
@@ -104,19 +105,22 @@ class TransferLearningDNN:
             verbose: 상세 출력
             bo_trials: BO 시행 횟수 (None이면 BO 사용 안함)
             data_size: 데이터 크기 ('small', 'medium', 'large')
+            use_loocv: LOOCV 사용 여부
+            use_uncertainty_loss: 불확실성 손실 사용 여부
+            uncertainty_weight: 불확실성 손실 가중치
         """
         self.pretrain_losses = []
         X_low = np.asarray(X_low, dtype=np.float32)
         y_low = np.asarray(y_low, dtype=np.float32).flatten()
-        
+
         if self.use_hyperparameter_bo and bo_trials is not None and bo_trials > 0:
             # 베이지안 최적화로 하이퍼파라미터 찾기
             if verbose:
                 print(f"    - Running Pretrain BO with {bo_trials} trials...")
-            
+
             # 검증 데이터 분할
             X_train, y_train, X_val, y_val = self._split_validation_data(X_low, y_low)
-            
+
             # BO 실행 (Optuna 사용) - Pretrain 단계: 모든 파라미터 탐색
             from .hyperparameter_optimization_optuna import optimize_dnn_hyperparameters_optuna
             best_params, best_performance, history = optimize_dnn_hyperparameters_optuna(
@@ -126,7 +130,10 @@ class TransferLearningDNN:
                 data_size=data_size,
                 device=self.device,
                 stage='pretrain',
-                verbose=verbose
+                verbose=verbose,
+                use_loocv=use_loocv,
+                use_uncertainty_loss=use_uncertainty_loss,
+                uncertainty_weight=uncertainty_weight
             )
             
             self.pretrain_best_params = best_params
@@ -159,10 +166,11 @@ class TransferLearningDNN:
             
 
     def finetune(self, X_high, y_high, epochs=50, lr=1e-4, verbose=False,
-                 bo_trials=None, data_size='small'):
+                 bo_trials=None, data_size='small',
+                 use_loocv=False, use_uncertainty_loss=False, uncertainty_weight=0.3):
         """
         High-fidelity 데이터로 finetune
-        
+
         Args:
             X_high: high-fidelity 입력 데이터
             y_high: high-fidelity 출력 데이터
@@ -171,24 +179,27 @@ class TransferLearningDNN:
             verbose: 상세 출력
             bo_trials: BO 시행 횟수 (None이면 BO 사용 안함)
             data_size: 데이터 크기 ('small', 'medium', 'large')
+            use_loocv: LOOCV 사용 여부
+            use_uncertainty_loss: 불확실성 손실 사용 여부
+            uncertainty_weight: 불확실성 손실 가중치
         """
         self.finetune_losses = []
         X_high = np.asarray(X_high, dtype=np.float32)
         y_high = np.asarray(y_high, dtype=np.float32).flatten()
-        
+
         if self.use_hyperparameter_bo and bo_trials is not None and bo_trials > 0:
             # 베이지안 최적화로 하이퍼파라미터 찾기
             if verbose:
                 print(f"    - Running Finetune BO with {bo_trials} trials...")
-            
+
             # 검증 데이터 분할
             X_train, y_train, X_val, y_val = self._split_validation_data(X_high, y_high)
-            
+
             # 현재 feature extractor의 출력 차원 확인
             with torch.no_grad():
                 sample_input = torch.tensor(X_train[:1], dtype=torch.float32).to(self.device)
                 feature_dim = self.feature_net(sample_input).shape[1]
-            
+
             # BO 실행 (feature를 입력으로 사용)
             X_train_features = self.extract_features(X_train)
             X_val_features = self.extract_features(X_val)
@@ -211,7 +222,10 @@ class TransferLearningDNN:
                 device=self.device,
                 stage='finetune',
                 fixed_structure=fixed_structure,
-                verbose=verbose
+                verbose=verbose,
+                use_loocv=use_loocv,
+                use_uncertainty_loss=use_uncertainty_loss,
+                uncertainty_weight=uncertainty_weight
             )
             
             self.finetune_best_params = best_params

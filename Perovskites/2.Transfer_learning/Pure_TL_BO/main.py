@@ -70,7 +70,7 @@ def parse_arguments():
                        help='총 비용 예산')
     parser.add_argument('--num-init-design', type=int, default=10,
                        help='초기 설계점 개수')
-    parser.add_argument('--high-fidelity-ratio', type=float, default=0.2,
+    parser.add_argument('--high-fidelity-ratio', type=float, default=0.125,
                        help='초기 설계에서 high-fidelity 비율')
     parser.add_argument('--min-target', type=float, default=1.5249,
                        help='목표 최솟값 (조기 종료 조건)')
@@ -94,6 +94,14 @@ def parse_arguments():
                        help='Finetune 하이퍼파라미터 BO 시행 횟수')
     parser.add_argument('--data-size', choices=['small', 'medium', 'large'], default='small',
                        help='데이터 크기 (하이퍼파라미터 탐색 공간 결정)')
+
+    # BO-Aware Objective 옵션 (LOOCV, Uncertainty Loss)
+    parser.add_argument('--use-loocv', action='store_true',
+                       help='HP 최적화 시 LOOCV (Leave-One-Out Cross Validation) 사용')
+    parser.add_argument('--use-uncertainty-loss', action='store_true',
+                       help='HP 최적화 시 불확실성 calibration 손실 (L_uncertainty) 사용')
+    parser.add_argument('--uncertainty-weight', type=float, default=0.3,
+                       help='불확실성 손실 가중치 (0~1, L_total = (1-w)*MSE + w*L_uncertainty)')
     
     # 점진적 학습 옵션
     parser.add_argument('--use-incremental-learning', action='store_true',
@@ -277,6 +285,16 @@ def print_configuration(args, param_space, model_config, incremental_params=None
         print(f"  Data size category: {args.data_size}")
         print(f"  Pretrain BO trials: {args.pretrain_bo_trials}")
         print(f"  Finetune BO trials: {args.finetune_bo_trials}")
+
+        # BO-Aware Objective 설정
+        eval_method = "LOOCV" if args.use_loocv else "Train/Val Split"
+        loss_type = f"MSE + L_uncertainty (w={args.uncertainty_weight})" if args.use_uncertainty_loss else "MSE only"
+        print(f"  Evaluation method: {eval_method}")
+        print(f"  Loss function: {loss_type}")
+        if args.use_loocv:
+            print(f"  ⚡ LOOCV: More stable for small data, but slower")
+        if args.use_uncertainty_loss:
+            print(f"  ⚡ L_uncertainty: Optimizes for better uncertainty calibration")
         print(f"  ⚠️  Note: This will significantly increase computation time!")
     else:
         print(f"\n🔧 Hyperparameter Bayesian Optimization:")
@@ -359,7 +377,10 @@ def main():
                     data_size=args.data_size,
                     model_type='DNGO',
                     use_incremental_learning=args.use_incremental_learning,
-                    incremental_params=incremental_params
+                    incremental_params=incremental_params,
+                    use_loocv=args.use_loocv,
+                    use_uncertainty_loss=args.use_uncertainty_loss,
+                    uncertainty_weight=args.uncertainty_weight
                 )
             elif args.model_type == 'dngo-ol':
                 result = single_optimization_run_dngo_ol(
@@ -374,7 +395,14 @@ def main():
                     verbose=args.verbose,
                     model_config=model_config,
                     save_images=args.save_images,
-                    images_dir=args.images_dir
+                    images_dir=args.images_dir,
+                    use_hyperparameter_bo=args.use_hyperparameter_bo,
+                    pretrain_bo_trials=args.pretrain_bo_trials,
+                    finetune_bo_trials=args.finetune_bo_trials,
+                    data_size=args.data_size,
+                    use_loocv=args.use_loocv,
+                    use_uncertainty_loss=args.use_uncertainty_loss,
+                    uncertainty_weight=args.uncertainty_weight
                 )
             else:  # BNN
                 result = single_optimization_run(
@@ -394,7 +422,10 @@ def main():
                     data_size=args.data_size,
                     model_type='BNN',
                     use_incremental_learning=args.use_incremental_learning,
-                    incremental_params=incremental_params
+                    incremental_params=incremental_params,
+                    use_loocv=args.use_loocv,
+                    use_uncertainty_loss=args.use_uncertainty_loss,
+                    uncertainty_weight=args.uncertainty_weight
                 )
             
             # 결과 출력
@@ -487,7 +518,10 @@ def main():
                     visualizations_dir='images',  # 시각화 저장 디렉토리
                     model_type='DNGO',
                     use_incremental_learning=args.use_incremental_learning,
-                    incremental_params=incremental_params
+                    incremental_params=incremental_params,
+                    use_loocv=args.use_loocv,
+                    use_uncertainty_loss=args.use_uncertainty_loss,
+                    uncertainty_weight=args.uncertainty_weight
                 )
             elif args.model_type == 'dngo-ol':
                 results = multiple_optimization_runs_dngo_ol(
@@ -501,7 +535,14 @@ def main():
                     min_target=args.min_target,
                     model_config=model_config,
                     save_results=args.save_results,
-                    results_filename='dngo_ol_results.csv'
+                    results_filename=args.results_filename if args.results_filename else 'dngo_ol_results.csv',
+                    use_hyperparameter_bo=args.use_hyperparameter_bo,
+                    pretrain_bo_trials=args.pretrain_bo_trials,
+                    finetune_bo_trials=args.finetune_bo_trials,
+                    data_size=args.data_size,
+                    use_loocv=args.use_loocv,
+                    use_uncertainty_loss=args.use_uncertainty_loss,
+                    uncertainty_weight=args.uncertainty_weight
                 )
             else:  # BNN
                 results = multiple_optimization_runs(
@@ -524,7 +565,10 @@ def main():
                     visualizations_dir='images',
                     model_type='BNN',
                     use_incremental_learning=args.use_incremental_learning,
-                    incremental_params=incremental_params
+                    incremental_params=incremental_params,
+                    use_loocv=args.use_loocv,
+                    use_uncertainty_loss=args.use_uncertainty_loss,
+                    uncertainty_weight=args.uncertainty_weight
                 )
             
             # 시각화

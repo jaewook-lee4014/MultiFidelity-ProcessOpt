@@ -52,10 +52,12 @@ def train_model(X_low: np.ndarray, y_low: np.ndarray, X_high: np.ndarray, y_high
                 use_hyperparameter_bo: bool = False, pretrain_bo_trials: int = 0,
                 finetune_bo_trials: int = 0, data_size: str = 'small',
                 verbose: bool = False, model_type: str = 'DNGO', hidden_dims: list = None,
-                incremental_params: Dict = None):
+                incremental_params: Dict = None,
+                use_loocv: bool = False, use_uncertainty_loss: bool = False,
+                uncertainty_weight: float = 0.3):
     """
     Universal Transfer Learning 모델 학습 (DNGO/BNN 모두 지원, 하이퍼파라미터 BO 지원)
-    
+
     Args:
         X_low: low-fidelity 입력 데이터
         y_low: low-fidelity 출력 데이터
@@ -76,7 +78,10 @@ def train_model(X_low: np.ndarray, y_low: np.ndarray, X_high: np.ndarray, y_high
         model_type: 모델 타입 ('DNGO' 또는 'BNN')
         hidden_dims: BNN용 hidden 차원 리스트 (BNN 모델에만 사용)
         incremental_params: 점진적 학습 파라미터 딕셔너리
-        
+        use_loocv: HP 최적화 시 LOOCV 사용 여부
+        use_uncertainty_loss: HP 최적화 시 불확실성 손실 사용 여부
+        uncertainty_weight: 불확실성 손실 가중치
+
     Returns:
         학습된 TransferLearningDNN 또는 TransferLearningBNN 모델
     """
@@ -117,30 +122,34 @@ def train_model(X_low: np.ndarray, y_low: np.ndarray, X_high: np.ndarray, y_high
     if len(X_low) > 0:
         if use_hyperparameter_bo and pretrain_bo_trials > 0:
             model.pretrain(
-                X_low, y_low, 
+                X_low, y_low,
                 epochs=pretrain_epochs, lr=pretrain_lr, verbose=verbose,
-                bo_trials=pretrain_bo_trials, data_size=data_size
+                bo_trials=pretrain_bo_trials, data_size=data_size,
+                use_loocv=use_loocv, use_uncertainty_loss=use_uncertainty_loss,
+                uncertainty_weight=uncertainty_weight
             )
         else:
             model.pretrain(
-                X_low, y_low, 
+                X_low, y_low,
                 epochs=pretrain_epochs, lr=pretrain_lr, verbose=verbose
             )
-    
+
     # Finetune with high-fidelity data
     if len(X_high) > 0:
         if use_hyperparameter_bo and finetune_bo_trials > 0:
             model.finetune(
-                X_high, y_high, 
+                X_high, y_high,
                 epochs=finetune_epochs, lr=finetune_lr, verbose=verbose,
-                bo_trials=finetune_bo_trials, data_size=data_size
+                bo_trials=finetune_bo_trials, data_size=data_size,
+                use_loocv=use_loocv, use_uncertainty_loss=use_uncertainty_loss,
+                uncertainty_weight=uncertainty_weight
             )
         else:
             model.finetune(
-                X_high, y_high, 
+                X_high, y_high,
                 epochs=finetune_epochs, lr=finetune_lr, verbose=verbose
             )
-    
+
     return model
 
 
@@ -185,16 +194,15 @@ def fit_blr(model, X_low: np.ndarray, X_high: np.ndarray,
             blr_low = BayesianLinearRegression(alpha=alpha, beta=beta)
             blr_low.fit(features_low, y_low)
         
-        # HIFI 모델용 BLR (LOFI로 pretrain된 모델을 HIFI로 fine-tune)
-        # 이미 model은 pretrain + finetune이 완료된 상태
+        # HIFI 모델용 BLR (high-fidelity 데이터만 사용)
+        # Transfer Learning: DNN은 pretrain(LOFI) + finetune(HIFI) 완료 상태
+        # BLR은 각 fidelity 데이터를 분리하여 학습 (DNGO-OL과 동일한 방식)
         blr_high = None
         if len(X_high) > 0:
-            # Transfer Learning: LOFI + HIFI 데이터 모두 사용
-            X_all = np.vstack([X_low, X_high]) if len(X_low) > 0 else X_high
-            y_all = np.concatenate([y_low, y_high]) if len(y_low) > 0 else y_high
-            features_all = model.extract_features(X_all)
+            # High-fidelity 데이터만 사용하여 BLR 학습
+            features_high = model.extract_features(X_high)
             blr_high = BayesianLinearRegression(alpha=alpha, beta=beta)
-            blr_high.fit(features_all, y_all)
+            blr_high.fit(features_high, y_high)
         else:
             # HIFI 데이터가 없으면 LOFI 모델을 그대로 사용
             blr_high = blr_low
@@ -317,15 +325,18 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
                            cost_budget: float = 50.0, num_init_design: int = 10,
                            high_fidelity_ratio: float = 0.2, min_target: float = 1.5249,
                            random_state: int = 42, verbose: bool = True,
-                           model_config: Dict = None, 
+                           model_config: Dict = None,
                            use_hyperparameter_bo: bool = False,
                            pretrain_bo_trials: int = 0, finetune_bo_trials: int = 0,
                            data_size: str = 'small', model_type: str = 'DNGO',
                            use_incremental_learning: bool = False,
-                           incremental_params: Dict = None) -> Dict:
+                           incremental_params: Dict = None,
+                           use_loocv: bool = False,
+                           use_uncertainty_loss: bool = False,
+                           uncertainty_weight: float = 0.3) -> Dict:
     """
     범용 단일 최적화 실행 (DNGO/BNN 모두 지원, 하이퍼파라미터 BO 지원)
-    
+
     Args:
         param_space: 파라미터 공간
         label_maps: 라벨 매핑
@@ -344,7 +355,10 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
         model_type: 모델 타입 ('DNGO' 또는 'BNN')
         use_incremental_learning: 점진적 학습 사용 여부
         incremental_params: 점진적 학습 파라미터
-        
+        use_loocv: HP 최적화 시 LOOCV 사용 여부
+        use_uncertainty_loss: HP 최적화 시 불확실성 손실 사용 여부
+        uncertainty_weight: 불확실성 손실 가중치
+
     Returns:
         결과 딕셔너리 (비용, best_so_far 곡선, 시간 등)
     """
@@ -479,7 +493,7 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
                 hidden_dims_param = model_config.get('hidden_dims', [64, 64])
             
             model = train_model(
-                X_low, y_low, X_high, y_high, 
+                X_low, y_low, X_high, y_high,
                 input_dim=model_config['input_dim'],
                 hidden_dim=hidden_dim_param,
                 device=model_config['device'],
@@ -492,7 +506,10 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
                 verbose=verbose,
                 model_type=model_type,
                 hidden_dims=hidden_dims_param,
-                incremental_params=incremental_params
+                incremental_params=incremental_params,
+                use_loocv=use_loocv,
+                use_uncertainty_loss=use_uncertainty_loss,
+                uncertainty_weight=uncertainty_weight
             )
             
             # 최적화된 파라미터 저장
@@ -798,7 +815,10 @@ def multiple_optimization_runs(param_space: Dict, label_maps: Dict, lookup: Dict
                               finetune_bo_trials: int = 0, data_size: str = 'small',
                               save_visualizations: bool = False, visualizations_dir: str = 'images',
                               model_type: str = 'DNGO', use_incremental_learning: bool = False,
-                              incremental_params: Dict = None) -> List[Dict]:
+                              incremental_params: Dict = None,
+                              use_loocv: bool = False,
+                              use_uncertainty_loss: bool = False,
+                              uncertainty_weight: float = 0.3) -> List[Dict]:
     """
     범용 다중 최적화 실행 (DNGO/BNN 모두 지원, 하이퍼파라미터 BO 지원)
     """
@@ -831,7 +851,10 @@ def multiple_optimization_runs(param_space: Dict, label_maps: Dict, lookup: Dict
             data_size=data_size,
             model_type=model_type,
             use_incremental_learning=use_incremental_learning,
-            incremental_params=incremental_params
+            incremental_params=incremental_params,
+            use_loocv=use_loocv,
+            use_uncertainty_loss=use_uncertainty_loss,
+            uncertainty_weight=uncertainty_weight
         )
         
         all_results.append(result)

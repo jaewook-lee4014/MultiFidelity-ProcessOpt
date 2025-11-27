@@ -104,17 +104,19 @@ class OnlineBayesianLinearRegression:
 
 class OnlineTransferLearningDNN(TransferLearningDNN):
     """온라인 학습을 위한 Transfer Learning DNN"""
-    
-    def __init__(self, input_dim: int = 3, hidden_dim: int = 64, 
+
+    def __init__(self, input_dim: int = 3, hidden_dim: int = 64,
                  device: str = 'cpu', replay_buffer_size: int = 100,
-                 online_batch_size: int = 16, online_epochs: int = 5):
+                 online_batch_size: int = 16, online_epochs: int = 5,
+                 use_hyperparameter_bo: bool = False):
         """
         Args:
             replay_buffer_size: 리플레이 버퍼 크기
             online_batch_size: 온라인 학습 배치 크기
             online_epochs: 온라인 업데이트 시 epoch 수
+            use_hyperparameter_bo: 하이퍼파라미터 BO 사용 여부
         """
-        super().__init__(input_dim, hidden_dim, device)
+        super().__init__(input_dim, hidden_dim, device, use_hyperparameter_bo=use_hyperparameter_bo)
         
         self.replay_buffer_size = replay_buffer_size
         self.online_batch_size = online_batch_size
@@ -185,10 +187,23 @@ def train_dngo_ol_models(X_low: np.ndarray, y_low: np.ndarray, X_high: np.ndarra
                         online_lr: float = 1e-5, forgetting_factor: float = 0.99,
                         memory_size: int = 100, replay_buffer_size: int = 100,
                         online_batch_size: int = 16, online_epochs: int = 5,
-                        verbose: bool = False) -> Tuple:
+                        verbose: bool = False,
+                        use_hyperparameter_bo: bool = False, pretrain_bo_trials: int = 0,
+                        finetune_bo_trials: int = 0, data_size: str = 'small',
+                        use_loocv: bool = False, use_uncertainty_loss: bool = False,
+                        uncertainty_weight: float = 0.3) -> Tuple:
     """
-    DNGO-OL 모델 학습 (온라인 학습 지원)
-    
+    DNGO-OL 모델 학습 (온라인 학습 지원, 하이퍼파라미터 BO 지원)
+
+    Args:
+        use_hyperparameter_bo: 하이퍼파라미터 BO 사용 여부
+        pretrain_bo_trials: pretrain BO 시행 횟수
+        finetune_bo_trials: finetune BO 시행 횟수
+        data_size: 데이터 크기 ('small', 'medium', 'large')
+        use_loocv: HP 최적화 시 LOOCV 사용 여부
+        use_uncertainty_loss: HP 최적화 시 불확실성 손실 사용 여부
+        uncertainty_weight: 불확실성 손실 가중치
+
     Returns:
         (model, blr_L, blr_H): DNN 모델과 LOW/HIGH BLR 모델들
     """
@@ -199,17 +214,30 @@ def train_dngo_ol_models(X_low: np.ndarray, y_low: np.ndarray, X_high: np.ndarra
         device=device,
         replay_buffer_size=replay_buffer_size,
         online_batch_size=online_batch_size,
-        online_epochs=online_epochs
+        online_epochs=online_epochs,
+        use_hyperparameter_bo=use_hyperparameter_bo
     )
-    
+
     # 초기 학습 (기존 데이터가 있는 경우)
     if len(X_low) > 0:
-        model.pretrain(X_low, y_low, epochs=pretrain_epochs, lr=pretrain_lr, verbose=verbose)
+        if use_hyperparameter_bo and pretrain_bo_trials > 0:
+            model.pretrain(X_low, y_low, epochs=pretrain_epochs, lr=pretrain_lr, verbose=verbose,
+                          bo_trials=pretrain_bo_trials, data_size=data_size,
+                          use_loocv=use_loocv, use_uncertainty_loss=use_uncertainty_loss,
+                          uncertainty_weight=uncertainty_weight)
+        else:
+            model.pretrain(X_low, y_low, epochs=pretrain_epochs, lr=pretrain_lr, verbose=verbose)
         if verbose:
             print("✅ DNGO-OL: Low-fidelity 초기 학습 완료")
-    
+
     if len(X_high) > 0:
-        model.finetune(X_high, y_high, epochs=finetune_epochs, lr=finetune_lr, verbose=verbose)
+        if use_hyperparameter_bo and finetune_bo_trials > 0:
+            model.finetune(X_high, y_high, epochs=finetune_epochs, lr=finetune_lr, verbose=verbose,
+                          bo_trials=finetune_bo_trials, data_size=data_size,
+                          use_loocv=use_loocv, use_uncertainty_loss=use_uncertainty_loss,
+                          uncertainty_weight=uncertainty_weight)
+        else:
+            model.finetune(X_high, y_high, epochs=finetune_epochs, lr=finetune_lr, verbose=verbose)
         if verbose:
             print("✅ DNGO-OL: High-fidelity 미세조정 완료")
     
@@ -351,10 +379,15 @@ def single_optimization_run_dngo_ol(param_space: Dict, label_maps: Dict, lookup:
                                    high_fidelity_ratio: float = 0.2, min_target: float = 1.5249,
                                    random_state: int = 42, verbose: bool = True,
                                    model_config: Dict = None, save_images: bool = False,
-                                   images_dir: str = 'images') -> Dict:
+                                   images_dir: str = 'images',
+                                   use_hyperparameter_bo: bool = False,
+                                   pretrain_bo_trials: int = 0, finetune_bo_trials: int = 0,
+                                   data_size: str = 'small',
+                                   use_loocv: bool = False, use_uncertainty_loss: bool = False,
+                                   uncertainty_weight: float = 0.3) -> Dict:
     """
-    DNGO-OL을 사용한 단일 최적화 실행
-    
+    DNGO-OL을 사용한 단일 최적화 실행 (하이퍼파라미터 BO 지원)
+
     Args:
         param_space: 파라미터 공간
         label_maps: 라벨 매핑
@@ -368,11 +401,18 @@ def single_optimization_run_dngo_ol(param_space: Dict, label_maps: Dict, lookup:
         model_config: 모델 설정
         save_images: 이미지 저장 여부
         images_dir: 이미지 저장 디렉토리
-        
+        use_hyperparameter_bo: 하이퍼파라미터 BO 사용 여부
+        pretrain_bo_trials: pretrain BO 시행 횟수
+        finetune_bo_trials: finetune BO 시행 횟수
+        data_size: 데이터 크기 ('small', 'medium', 'large')
+        use_loocv: HP 최적화 시 LOOCV 사용 여부
+        use_uncertainty_loss: HP 최적화 시 불확실성 손실 사용 여부
+        uncertainty_weight: 불확실성 손실 가중치
+
     Returns:
         결과 딕셔너리
     """
-    from data_utils import (
+    from common.data_utils import (
         sample_param_space, assign_fidelities, prepare_initial_data,
         measure_from_label, append_measurement_to_data
     )
@@ -450,7 +490,14 @@ def single_optimization_run_dngo_ol(param_space: Dict, label_maps: Dict, lookup:
         replay_buffer_size=model_config['replay_buffer_size'],
         online_batch_size=model_config['online_batch_size'],
         online_epochs=model_config['online_epochs'],
-        verbose=verbose
+        verbose=verbose,
+        use_hyperparameter_bo=use_hyperparameter_bo,
+        pretrain_bo_trials=pretrain_bo_trials,
+        finetune_bo_trials=finetune_bo_trials,
+        data_size=data_size,
+        use_loocv=use_loocv,
+        use_uncertainty_loss=use_uncertainty_loss,
+        uncertainty_weight=uncertainty_weight
     )
     
     if verbose:
@@ -571,21 +618,29 @@ def multiple_optimization_runs_dngo_ol(param_space: Dict, label_maps: Dict, look
                                       num_runs: int = 100, cost_budget: float = 50.0,
                                       num_init_design: int = 10, high_fidelity_ratio: float = 0.2,
                                       min_target: float = 1.5249, model_config: Dict = None,
-                                      save_results: bool = True, 
-                                      results_filename: str = 'dngo_ol_results.csv') -> List[Dict]:
+                                      save_results: bool = True,
+                                      results_filename: str = 'dngo_ol_results.csv',
+                                      use_hyperparameter_bo: bool = False,
+                                      pretrain_bo_trials: int = 0, finetune_bo_trials: int = 0,
+                                      data_size: str = 'small',
+                                      use_loocv: bool = False, use_uncertainty_loss: bool = False,
+                                      uncertainty_weight: float = 0.3) -> List[Dict]:
     """
-    DNGO-OL을 사용한 다중 최적화 실행
+    DNGO-OL을 사용한 다중 최적화 실행 (하이퍼파라미터 BO 지원)
     """
     import pandas as pd
-    
+
     all_results = []
     all_costs = []
-    
+
     print(f"🚀 Starting {num_runs} optimization runs with DNGO-OL (Online Learning)...")
-    
+    if use_hyperparameter_bo:
+        print(f"   Hyperparameter BO: pretrain_trials={pretrain_bo_trials}, finetune_trials={finetune_bo_trials}")
+        print(f"   LOOCV: {use_loocv}, Uncertainty Loss: {use_uncertainty_loss} (weight={uncertainty_weight})")
+
     for run in range(num_runs):
         print(f"\n===== Run {run+1}/{num_runs} =====")
-        
+
         result = single_optimization_run_dngo_ol(
             param_space=param_space,
             label_maps=label_maps,
@@ -596,7 +651,14 @@ def multiple_optimization_runs_dngo_ol(param_space: Dict, label_maps: Dict, look
             min_target=min_target,
             random_state=run,
             verbose=False,
-            model_config=model_config
+            model_config=model_config,
+            use_hyperparameter_bo=use_hyperparameter_bo,
+            pretrain_bo_trials=pretrain_bo_trials,
+            finetune_bo_trials=finetune_bo_trials,
+            data_size=data_size,
+            use_loocv=use_loocv,
+            use_uncertainty_loss=use_uncertainty_loss,
+            uncertainty_weight=uncertainty_weight
         )
         
         all_results.append(result)

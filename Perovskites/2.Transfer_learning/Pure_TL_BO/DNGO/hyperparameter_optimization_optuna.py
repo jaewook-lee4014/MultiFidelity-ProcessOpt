@@ -3,6 +3,10 @@ Optuna 기반 DNN 하이퍼파라미터 베이지안 최적화 모듈
 
 Pretrain과 Finetune 단계에서 각각 Optuna를 통해
 최적의 하이퍼파라미터를 찾습니다.
+
+개선 사항:
+- LOOCV (Leave-One-Out Cross Validation) 지원
+- BO-Aware Objective: 불확실성 calibration (L_uncertainty) 지원
 """
 
 import numpy as np
@@ -13,7 +17,8 @@ from typing import Dict, List, Tuple, Optional
 import optuna
 from optuna.pruners import MedianPruner
 from optuna.samplers import TPESampler
-from .models import TransferLearningDNN
+from .models import TransferLearningDNN, BayesianLinearRegression
+from scipy.stats import spearmanr
 import time
 from tqdm import tqdm
 
@@ -44,13 +49,264 @@ class OptunaDNN(nn.Module):
         return self.network(x)
 
 
+def compute_uncertainty_loss(errors: np.ndarray, uncertainties: np.ndarray) -> float:
+    """
+    불확실성 calibration 손실 계산 (Error-Uncertainty Correlation)
+
+    L_uncertainty = 1 - Spearman_Correlation(|errors|, uncertainties)
+
+    Args:
+        errors: 예측 오차 배열 |y_pred - y_true|
+        uncertainties: 예측 불확실성 배열 (표준편차)
+
+    Returns:
+        L_uncertainty: [0, 2] 범위
+        - 0: 완벽한 calibration (오차와 불확실성이 완전 상관)
+        - 1: 상관관계 없음
+        - 2: 역상관 (최악)
+    """
+    if len(errors) < 3:
+        # 데이터가 너무 적으면 계산 불가
+        return 0.0
+
+    # 분산이 0인 경우 처리
+    if np.std(errors) < 1e-8 or np.std(uncertainties) < 1e-8:
+        return 1.0  # 상관관계 계산 불가 → 중립값 반환
+
+    correlation, _ = spearmanr(errors, uncertainties)
+
+    if np.isnan(correlation):
+        return 1.0
+
+    return 1.0 - correlation
+
+
+def evaluate_with_loocv(X: np.ndarray, y: np.ndarray,
+                        hidden_layers: int, hidden_dim: int,
+                        learning_rate: float, epochs: int,
+                        device: str, use_uncertainty_loss: bool = False,
+                        uncertainty_weight: float = 0.3) -> float:
+    """
+    LOOCV (Leave-One-Out Cross Validation)를 사용한 모델 평가
+
+    Args:
+        X: 전체 입력 데이터
+        y: 전체 출력 데이터
+        hidden_layers: hidden layer 수
+        hidden_dim: hidden dimension
+        learning_rate: 학습률
+        epochs: epoch 수
+        device: 디바이스
+        use_uncertainty_loss: 불확실성 손실 사용 여부
+        uncertainty_weight: 불확실성 손실 가중치 (0~1)
+
+    Returns:
+        평균 검증 손실 (MSE 또는 MSE + L_uncertainty)
+    """
+    n = len(X)
+    predictions = np.zeros(n)
+    uncertainties = np.zeros(n)
+
+    for i in range(n):
+        # Leave-One-Out: i번째 샘플 제외
+        X_train = np.delete(X, i, axis=0)
+        y_train = np.delete(y, i, axis=0)
+        X_val = X[i:i+1]
+        y_val = y[i:i+1]
+
+        # 모델 생성 및 학습
+        model = OptunaDNN(X.shape[1], hidden_layers, hidden_dim, device)
+
+        X_train_tensor = torch.tensor(X_train, dtype=torch.float32).to(device)
+        y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+        X_val_tensor = torch.tensor(X_val, dtype=torch.float32).to(device)
+
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        criterion = nn.MSELoss()
+
+        # 학습 (짧은 epoch - LOOCV는 n번 반복하므로)
+        reduced_epochs = max(epochs // 3, 20)  # epoch 수 감소
+        model.train()
+        for _ in range(reduced_epochs):
+            optimizer.zero_grad()
+            pred = model(X_train_tensor)
+            loss = criterion(pred, y_train_tensor)
+            loss.backward()
+            optimizer.step()
+
+        # 예측
+        model.eval()
+        with torch.no_grad():
+            pred = model(X_val_tensor).cpu().numpy().flatten()[0]
+            predictions[i] = pred
+
+        # 불확실성 계산 (BLR 사용)
+        if use_uncertainty_loss:
+            # Feature 추출을 위한 forward pass
+            features_train = []
+            features_val = []
+
+            # 마지막 hidden layer 출력을 feature로 사용
+            def get_features(module, input, output):
+                features_train.append(output.detach().cpu().numpy())
+
+            # Hook 등록 (마지막 ReLU 이전 layer)
+            # 간단하게: 전체 네트워크의 출력 직전 hidden layer 사용
+            with torch.no_grad():
+                # 마지막 layer 제외한 feature 추출
+                feature_extractor = nn.Sequential(*list(model.network.children())[:-1])
+                feat_train = feature_extractor(X_train_tensor).cpu().numpy()
+                feat_val = feature_extractor(X_val_tensor).cpu().numpy()
+
+            # BLR로 불확실성 추정
+            blr = BayesianLinearRegression(alpha=1.0, beta=25.0)
+            blr.fit(feat_train, y_train)
+            _, var = blr.predict(feat_val[0])
+            uncertainties[i] = np.sqrt(max(var, 1e-8))
+
+    # MSE 계산
+    errors = np.abs(predictions - y)
+    mse = np.mean(errors ** 2)
+
+    # 불확실성 손실 계산 (선택적)
+    if use_uncertainty_loss and n >= 5:
+        l_uncertainty = compute_uncertainty_loss(errors, uncertainties)
+        # 결합: (1-w)*MSE + w*L_uncertainty
+        # MSE와 L_uncertainty 스케일 정규화
+        mse_normalized = mse / (np.var(y) + 1e-8)  # 정규화
+        total_loss = (1 - uncertainty_weight) * mse_normalized + uncertainty_weight * l_uncertainty
+        return total_loss
+
+    return mse
+
+
+def evaluate_with_train_val_split(X_train: np.ndarray, y_train: np.ndarray,
+                                   X_val: np.ndarray, y_val: np.ndarray,
+                                   hidden_layers: int, hidden_dim: int,
+                                   learning_rate: float, epochs: int,
+                                   device: str, trial: optuna.Trial,
+                                   use_uncertainty_loss: bool = False,
+                                   uncertainty_weight: float = 0.3) -> float:
+    """
+    기존 Train/Val 분할을 사용한 모델 평가 (기본 방식)
+
+    Args:
+        X_train, y_train: 훈련 데이터
+        X_val, y_val: 검증 데이터
+        hidden_layers: hidden layer 수
+        hidden_dim: hidden dimension
+        learning_rate: 학습률
+        epochs: epoch 수
+        device: 디바이스
+        trial: Optuna trial (pruning용)
+        use_uncertainty_loss: 불확실성 손실 사용 여부
+        uncertainty_weight: 불확실성 손실 가중치
+
+    Returns:
+        검증 손실
+    """
+    # 모델 생성
+    model = OptunaDNN(X_train.shape[1], hidden_layers, hidden_dim, device)
+
+    # 데이터 준비
+    X_train_tensor = torch.tensor(X_train, dtype=torch.float32).to(device)
+    y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    X_val_tensor = torch.tensor(X_val, dtype=torch.float32).to(device)
+    y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    criterion = nn.MSELoss()
+
+    # 학습
+    model.train()
+    for epoch in range(epochs):
+        optimizer.zero_grad()
+        pred = model(X_train_tensor)
+        loss = criterion(pred, y_train_tensor)
+        loss.backward()
+        optimizer.step()
+
+        # Pruning을 위한 중간 검증 (10 epoch마다)
+        if epoch % 10 == 0:
+            model.eval()
+            with torch.no_grad():
+                val_pred = model(X_val_tensor)
+                val_loss = criterion(val_pred, y_val_tensor).item()
+            model.train()
+
+            trial.report(val_loss, epoch)
+            if trial.should_prune():
+                raise optuna.TrialPruned()
+
+    # 최종 평가
+    model.eval()
+    with torch.no_grad():
+        val_pred = model(X_val_tensor).cpu().numpy().flatten()
+        y_val_np = y_val.flatten()
+
+    # MSE 계산
+    errors = np.abs(val_pred - y_val_np)
+    mse = np.mean(errors ** 2)
+
+    # 불확실성 손실 계산 (선택적)
+    if use_uncertainty_loss and len(X_val) >= 3:
+        # Feature 추출
+        with torch.no_grad():
+            feature_extractor = nn.Sequential(*list(model.network.children())[:-1])
+            feat_train = feature_extractor(X_train_tensor).cpu().numpy()
+            feat_val = feature_extractor(X_val_tensor).cpu().numpy()
+
+        # BLR로 불확실성 추정
+        blr = BayesianLinearRegression(alpha=1.0, beta=25.0)
+        blr.fit(feat_train, y_train.flatten())
+
+        uncertainties = np.zeros(len(X_val))
+        for i in range(len(X_val)):
+            _, var = blr.predict(feat_val[i])
+            uncertainties[i] = np.sqrt(max(var, 1e-8))
+
+        l_uncertainty = compute_uncertainty_loss(errors, uncertainties)
+
+        # 결합
+        mse_normalized = mse / (np.var(y_val_np) + 1e-8)
+        total_loss = (1 - uncertainty_weight) * mse_normalized + uncertainty_weight * l_uncertainty
+        return total_loss
+
+    return mse
+
+
 def create_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                            X_val: np.ndarray, y_val: np.ndarray,
                            input_dim: int, device: str, data_size: str,
                            stage: str = 'pretrain',
                            fixed_structure: Dict = None,
-                           optimize_incremental: bool = False):
-    """Optuna objective function 생성 (incremental learning 포함)"""
+                           optimize_incremental: bool = False,
+                           use_loocv: bool = False,
+                           use_uncertainty_loss: bool = False,
+                           uncertainty_weight: float = 0.3):
+    """
+    Optuna objective function 생성
+
+    Args:
+        X_train, y_train: 훈련 데이터
+        X_val, y_val: 검증 데이터 (use_loocv=False일 때 사용)
+        input_dim: 입력 차원
+        device: 디바이스
+        data_size: 데이터 크기
+        stage: 'pretrain' 또는 'finetune'
+        fixed_structure: finetune시 고정할 구조
+        optimize_incremental: incremental learning 최적화 여부
+        use_loocv: LOOCV 사용 여부 (True면 X_train+X_val 전체로 LOOCV)
+        use_uncertainty_loss: 불확실성 calibration 손실 사용 여부
+        uncertainty_weight: 불확실성 손실 가중치 (0~1)
+    """
+    # LOOCV 사용 시 전체 데이터 병합
+    if use_loocv:
+        X_all = np.vstack([X_train, X_val])
+        y_all = np.concatenate([y_train, y_val])
+    else:
+        X_all = None
+        y_all = None
 
     def objective(trial):
         # Stage별 하이퍼파라미터 제안
@@ -107,39 +363,41 @@ def create_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
             }
         
         try:
-            # 모델 생성
-            model = OptunaDNN(input_dim, hidden_layers, hidden_dim, device)
-            
-            # 데이터 준비
-            X_train_tensor = torch.tensor(X_train, dtype=torch.float32).to(device)
-            y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
-            X_val_tensor = torch.tensor(X_val, dtype=torch.float32).to(device)
-            y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
-            
-            # 옵티마이저 및 손실함수
-            optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-            criterion = nn.MSELoss()
-            
-            # Incremental learning 시뮬레이션 또는 기본 학습
-            if optimize_incremental and incremental_params:
+            # 평가 방법 선택
+            if use_loocv and X_all is not None:
+                # LOOCV 사용
+                val_loss = evaluate_with_loocv(
+                    X_all, y_all,
+                    hidden_layers, hidden_dim,
+                    learning_rate, epochs,
+                    device,
+                    use_uncertainty_loss=use_uncertainty_loss,
+                    uncertainty_weight=uncertainty_weight
+                )
+            elif optimize_incremental and incremental_params:
                 # Incremental learning 시뮬레이션
+                model = OptunaDNN(input_dim, hidden_layers, hidden_dim, device)
                 val_loss = _simulate_incremental_learning(
-                    model, X_train, y_train, X_val, y_val, 
+                    model, X_train, y_train, X_val, y_val,
                     learning_rate, epochs, incremental_params, device, trial
                 )
             else:
-                # 기본 전체 학습
-                val_loss = _standard_training(
-                    model, X_train, y_train, X_val, y_val,
-                    learning_rate, epochs, device, trial
+                # 기본 Train/Val 분할 방식
+                val_loss = evaluate_with_train_val_split(
+                    X_train, y_train, X_val, y_val,
+                    hidden_layers, hidden_dim,
+                    learning_rate, epochs,
+                    device, trial,
+                    use_uncertainty_loss=use_uncertainty_loss,
+                    uncertainty_weight=uncertainty_weight
                 )
-            
+
             return val_loss
-            
+
         except Exception as e:
             # 오류 시 매우 큰 값 반환
             return float('inf')
-    
+
     return objective
 
 
@@ -309,7 +567,10 @@ def optimize_dnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
                                         data_size: str = 'small', device: str = 'cpu',
                                         stage: str = 'pretrain',
                                         fixed_structure: Dict = None,
-                                        verbose: bool = True, optimize_incremental: bool = False) -> Tuple[Dict, float, List]:
+                                        verbose: bool = True, optimize_incremental: bool = False,
+                                        use_loocv: bool = False,
+                                        use_uncertainty_loss: bool = False,
+                                        uncertainty_weight: float = 0.3) -> Tuple[Dict, float, List]:
     """
     Optuna를 사용한 DNN 하이퍼파라미터 베이지안 최적화
 
@@ -325,6 +586,10 @@ def optimize_dnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
         stage: 'pretrain' 또는 'finetune' - 최적화 단계
         fixed_structure: finetune일 때 사용할 고정된 구조 {'hidden_layers': int, 'hidden_dim': int}
         verbose: 상세 출력
+        optimize_incremental: incremental learning 최적화 여부
+        use_loocv: LOOCV 사용 여부 (기본: False, 기존 Train/Val 분할)
+        use_uncertainty_loss: 불확실성 calibration 손실 사용 여부 (기본: False, 기존 MSE만)
+        uncertainty_weight: 불확실성 손실 가중치 (기본: 0.3, L_total = 0.7*MSE + 0.3*L_uncertainty)
 
     Returns:
         최적 하이퍼파라미터, 최적 성능, 전체 기록
@@ -332,7 +597,11 @@ def optimize_dnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
 
     # Optuna study 생성
     sampler = TPESampler(seed=42)
-    pruner = MedianPruner(n_startup_trials=3, n_warmup_steps=20)
+    # LOOCV 사용 시 pruning 비활성화 (LOOCV는 중간 결과를 report하지 않음)
+    if use_loocv:
+        pruner = optuna.pruners.NopPruner()
+    else:
+        pruner = MedianPruner(n_startup_trials=3, n_warmup_steps=20)
 
     study = optuna.create_study(
         direction='minimize',
@@ -340,17 +609,27 @@ def optimize_dnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
         pruner=pruner
     )
 
-    # Objective function 생성 (stage 및 incremental learning 포함)
-    objective = create_optuna_objective(X_train, y_train, X_val, y_val, input_dim, device, data_size,
-                                       stage, fixed_structure, optimize_incremental)
+    # Objective function 생성
+    objective = create_optuna_objective(
+        X_train, y_train, X_val, y_val, input_dim, device, data_size,
+        stage, fixed_structure, optimize_incremental,
+        use_loocv=use_loocv,
+        use_uncertainty_loss=use_uncertainty_loss,
+        uncertainty_weight=uncertainty_weight
+    )
     
     # 최적화 실행 with progress bar
     stage_prefix = "Pretrain" if stage == 'pretrain' else "Finetune"
+
+    # 평가 방법 문자열 생성
+    eval_method = "LOOCV" if use_loocv else "Train/Val"
+    loss_type = f"MSE+Unc(w={uncertainty_weight})" if use_uncertainty_loss else "MSE"
+
     if verbose:
         # Optuna의 verbosity 조절
         optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-        with tqdm(total=n_trials, desc=f"      {stage_prefix} HP-BO",
+        with tqdm(total=n_trials, desc=f"      {stage_prefix} HP-BO ({eval_method}, {loss_type})",
                   bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}') as pbar:
 
             def callback(study, trial):
@@ -382,6 +661,6 @@ def optimize_dnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
             print(f"      ✅ Best {stage_prefix} params: layers={best_params['hidden_layers']}, dim={best_params['hidden_dim']}, lr={best_params['learning_rate']:.1e}, epochs={best_params['epochs']}")
         else:
             print(f"      ✅ Best {stage_prefix} params: lr={best_params['learning_rate']:.1e}, epochs={best_params['epochs']} (structure fixed)")
-        print(f"      ✅ Best loss: {best_performance:.4f}")
+        print(f"      ✅ Best loss: {best_performance:.4f} (eval: {eval_method}, loss: {loss_type})")
 
     return best_params, best_performance, trial_history

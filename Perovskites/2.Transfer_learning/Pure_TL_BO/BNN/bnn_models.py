@@ -197,25 +197,28 @@ class TransferLearningBNN:
     Replaces DNGO in the optimization pipeline
     """
     
-    def __init__(self, input_dim: int, hidden_dims: List[int] = [64, 64], 
-                 device: str = 'cpu', prior_std: float = 1.0, 
-                 noise_type: str = 'homoscedastic', use_hyperparameter_bo: bool = False):
+    def __init__(self, input_dim: int, hidden_dims: List[int] = [64, 64],
+                 device: str = 'cpu', prior_std: float = 1.0,
+                 noise_type: str = 'homoscedastic', use_hyperparameter_bo: bool = False,
+                 kl_weight: float = 1.0, kl_warmup_epochs: int = 10):
         self.input_dim = input_dim
         self.hidden_dims = hidden_dims
         self.device = device
         self.prior_std = prior_std
         self.noise_type = noise_type
-        
+        self.kl_weight = kl_weight
+        self.kl_warmup_epochs = kl_warmup_epochs
+
         # Training history
         self.pretrain_losses = []
         self.finetune_losses = []
-        
+
         # Models
         self.feature_extractor = None
         self.bnn = None
         self.fitted = False
         self.use_direct_bnn = False  # Flag for direct BNN mode
-        
+
         # 하이퍼파라미터 최적화 관련
         self.use_hyperparameter_bo = use_hyperparameter_bo
         self.pretrain_best_params = None
@@ -255,22 +258,24 @@ class TransferLearningBNN:
             nn.ReLU(),
         ).to(self.device).float()
     
-    def pretrain(self, X_low: np.ndarray, y_low: np.ndarray, 
+    def pretrain(self, X_low: np.ndarray, y_low: np.ndarray,
                  epochs: int = 200, lr: float = 1e-3, verbose: bool = False,
-                 bo_trials: Optional[int] = None, data_size: str = 'small'):
+                 bo_trials: Optional[int] = None, data_size: str = 'small',
+                 use_loocv: bool = False, use_uncertainty_loss: bool = False,
+                 uncertainty_weight: float = 0.3):
         """Pretrain feature extractor on low-fidelity data with optional BO"""
         self.pretrain_losses = []
         X_low = np.asarray(X_low, dtype=np.float32)
         y_low = np.asarray(y_low, dtype=np.float32).flatten()
-        
+
         if verbose:
             print(f"Pretrain BNN feature extractor with {len(X_low)} low-fidelity samples")
-        
+
         # Hyperparameter BO for pretrain
         if self.use_hyperparameter_bo and bo_trials is not None and bo_trials > 0:
             if verbose:
                 print(f"🔍 Pretrain 하이퍼파라미터 최적화 시작 ({bo_trials} trials)...")
-            
+
             # 검증 데이터 분할
             from sklearn.model_selection import train_test_split
             if len(X_low) >= 5:  # 최소 5개 샘플 필요
@@ -279,7 +284,7 @@ class TransferLearningBNN:
                 )
             else:
                 X_train, y_train, X_val, y_val = X_low, y_low, X_low, y_low
-            
+
             # Pretrain 전용 BO 실행 (Optuna 사용)
             from .hyperparameter_optimization_bnn_optuna import optimize_bnn_hyperparameters_optuna
             best_params, best_performance, history = optimize_bnn_hyperparameters_optuna(
@@ -289,7 +294,10 @@ class TransferLearningBNN:
                 data_size=data_size,
                 device=self.device,
                 verbose=verbose,
-                stage='pretrain'  # pretrain 전용 탐색 공간 사용
+                stage='pretrain',  # pretrain 전용 탐색 공간 사용
+                use_loocv=use_loocv,
+                use_uncertainty_loss=use_uncertainty_loss,
+                uncertainty_weight=uncertainty_weight
             )
             
             self.pretrain_best_params = best_params
@@ -400,32 +408,34 @@ class TransferLearningBNN:
         self._clear_cache()
         self.fitted = True
     
-    def finetune(self, X_high: np.ndarray, y_high: np.ndarray, 
+    def finetune(self, X_high: np.ndarray, y_high: np.ndarray,
                  epochs: int = 100, lr: float = 1e-4, kl_weight: float = 1.0,
                  kl_warmup_epochs: int = 10, verbose: bool = False,
-                 bo_trials: Optional[int] = None, data_size: str = 'small'):
+                 bo_trials: Optional[int] = None, data_size: str = 'small',
+                 use_loocv: bool = False, use_uncertainty_loss: bool = False,
+                 uncertainty_weight: float = 0.3):
         """Finetune with BNN on high-fidelity data"""
         self.finetune_losses = []
         X_high = np.asarray(X_high, dtype=np.float32)
         y_high = np.asarray(y_high, dtype=np.float32).flatten()
-        
+
         if verbose:
             print(f"Finetune BNN with {len(X_high)} high-fidelity samples")
-        
+
         # Extract features using pretrained feature extractor
         if self.feature_extractor is None:
             self._build_feature_extractor()
-        
+
         with torch.no_grad():
             X_tensor = torch.tensor(X_high, dtype=torch.float32).to(self.device)
             features = self.feature_extractor(X_tensor)
             feature_dim = features.shape[1]
-        
+
         # 하이퍼파라미터 베이지안 최적화
         if self.use_hyperparameter_bo and bo_trials is not None and bo_trials > 0:
             if verbose:
                 print(f"🔍 BNN 하이퍼파라미터 최적화 시작 ({bo_trials} trials)...")
-            
+
             # 검증 데이터 분할
             from sklearn.model_selection import train_test_split
             if len(X_high) >= 3:
@@ -434,7 +444,7 @@ class TransferLearningBNN:
                 )
             else:
                 X_train, y_train, X_val, y_val = X_high, y_high, X_high, y_high
-            
+
             # BNN 하이퍼파라미터 최적화 실행 (Optuna 사용)
             # Pretrain에서 결정된 구조를 고정
             if hasattr(self, 'pretrain_best_params') and 'hidden_dims' in self.pretrain_best_params:
@@ -459,7 +469,10 @@ class TransferLearningBNN:
                 device=self.device,
                 verbose=verbose,
                 stage='finetune',
-                fixed_structure=fixed_structure
+                fixed_structure=fixed_structure,
+                use_loocv=use_loocv,
+                use_uncertainty_loss=use_uncertainty_loss,
+                uncertainty_weight=uncertainty_weight
             )
             
             self.finetune_best_params = best_params
@@ -470,13 +483,15 @@ class TransferLearningBNN:
                 print(f"✅ 최적 성능: {best_performance:.4f}")
             
             # 최적 하이퍼파라미터로 모델 구성
-            self.hidden_dims = best_params['hidden_dims']
-            self.prior_std = best_params['prior_std']
-            self.noise_type = best_params['noise_type']
+            # finetune에서는 hidden_dims는 pretrain에서 결정된 값 유지
+            if 'hidden_dims' in best_params:
+                self.hidden_dims = best_params['hidden_dims']
+            self.prior_std = best_params.get('prior_std', self.prior_std)
+            self.noise_type = best_params.get('noise_type', self.noise_type)
             epochs = best_params['finetune_epochs']
             lr = best_params['finetune_lr']
-            kl_weight = best_params['kl_weight']
-            kl_warmup_epochs = best_params['kl_warmup_epochs']
+            kl_weight = best_params.get('kl_weight', self.kl_weight)
+            kl_warmup_epochs = best_params.get('kl_warmup_epochs', self.kl_warmup_epochs)
         
         # Build BNN
         self.bnn = BayesianNeuralNetwork(
