@@ -1,0 +1,1 @@
+[2025-11-27T21:28:37.609] error: *** JOB 30166718 ON erc-hpc-comp183 CANCELLED AT 2025-11-27T21:28:37 DUE to SIGNAL Terminated ***

@@ -1,0 +1,23 @@
+
+CommandNotFoundError: Your shell has not been properly configured to use 'conda activate'.
+To initialize your shell, run
+
+    $ conda init <SHELL_NAME>
+
+Currently supported shells are:
+  - bash
+  - fish
+  - tcsh
+  - xonsh
+  - zsh
+  - powershell
+
+See 'conda init --help' for more information and options.
+
+IMPORTANT: You may need to close and restart your shell after running 'conda init'.
+
+
+
+[notice] A new release of pip is available: 25.1.1 -> 25.3
+[notice] To update, run: python -m pip install --upgrade pip
+[2025-11-27T20:11:12.308] error: *** JOB 30162709 ON erc-hpc-comp026 CANCELLED AT 2025-11-27T20:11:12 DUE to SIGNAL Terminated ***

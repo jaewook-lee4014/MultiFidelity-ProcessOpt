@@ -1,0 +1,57 @@
+[Thu 27 Nov 21:40:06 GMT 2025] which python: /software/spackages_v0_21_prod/apps/linux-ubuntu22.04-zen2/gcc-13.2.0/anaconda3-2022.10-5wy43yh5crcsmws4afls5thwoskzarhe/bin/python
+Python 3.9.13
+[Thu 27 Nov 21:40:06 GMT 2025] Starting dngo...
+Loading data...
+🔍 BNN을 위한 최적 디바이스 검색 중...
+🖥️  GPU 없음 - CPU 사용
+============================================================
+Transfer Learning Bayesian Optimization Configuration
+============================================================
+Execution Mode: Multiple Runs (100)
+Model Type: DNGO
+
+Optimization Parameters:
+  Cost budget: 50.0
+  Initial design points: 10
+  High-fidelity ratio: 0.125
+  Target minimum: 1.5249
+
+Parameter Space:
+  Organic materials: 16
+  Cations: 3
+  Anions: 4
+  Total combinations: 192
+
+Model Configuration:
+  Input dimension: 3
+  Hidden dimension: 64
+  Pretrain epochs: 200
+  Finetune epochs: 100
+  Device: cpu
+
+🔧 Hyperparameter Bayesian Optimization:
+  Enabled: Yes
+  Data size category: small
+  Pretrain BO trials: 50
+  Finetune BO trials: 50
+  Evaluation method: LOOCV
+  Loss function: MSE + L_uncertainty (w=0.3)
+  ⚡ LOOCV: More stable for small data, but slower
+  ⚡ L_uncertainty: Optimizes for better uncertainty calibration
+  ⚠️  Note: This will significantly increase computation time!
+
+🔄 Incremental Learning:
+  Enabled: No (using full retraining)
+============================================================
+
+⚠️  WARNING: Hyperparameter BO is enabled!
+   Each iteration may take ~200 times longer.
+   Consider using smaller trial numbers for testing.
+   Multiple runs with BO may take very long time!
+
+Starting 100 optimization runs...
+Starting 100 optimization runs...
+🔧 Using hyperparameter BO: pretrain=50, finetune=50
+
+===== Run 1/100 =====
+[I 2025-11-27 21:41:44,205] A new study created in memory with name: no-name-7f81051c-98e6-4379-a0c6-aeed5b3cc3d8

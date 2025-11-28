@@ -9,11 +9,15 @@ from sklearn.model_selection import train_test_split
 class TransferLearningDNN:
     """
     Transfer Learning을 위한 Deep Neural Network 클래스
-    - Pretrain: low-fidelity 데이터로 feature extractor 학습
-    - Finetune: high-fidelity 데이터로 전체 네트워크 미세조정
-    - 하이퍼파라미터 베이지안 최적화 지원
+    - Pretrain: low-fidelity 데이터로 전체 네트워크 학습
+    - Finetune: high-fidelity 데이터로 unfreeze_ratio에 따라 부분 학습
+    - 하이퍼파라미터 베이지안 최적화 지원 (구조 + unfreeze_ratio)
+
+    네트워크 구조:
+        feature_net: 범용 표현 학습 레이어들 (pretrain에서 학습, finetune에서 부분 동결)
+        out_layer: 출력층 (항상 학습)
     """
-    
+
     def __init__(self, input_dim, hidden_dim=64, device='cpu', use_hyperparameter_bo=False):
         self.input_dim = input_dim
         self.device = device
@@ -21,13 +25,17 @@ class TransferLearningDNN:
         self.use_hyperparameter_bo = use_hyperparameter_bo
         self.pretrain_losses = []
         self.finetune_losses = []
-        
+
         # BO 관련 변수
         self.pretrain_best_params = None
         self.finetune_best_params = None
         self.pretrain_bo_history = []
         self.finetune_bo_history = []
-        
+
+        # Freeze 관련 변수
+        self.num_layers = 2  # 기본 레이어 수 (BO로 결정될 수 있음)
+        self.layer_list = []  # 개별 레이어 리스트 (freeze 제어용)
+
         # Incremental learning 관련 변수
         self.incremental_params = None  # BO로 설정될 파라미터
         self.data_buffer = {'X_low': [], 'y_low': [], 'X_high': [], 'y_high': []}
@@ -39,44 +47,57 @@ class TransferLearningDNN:
             self._build_default_model(hidden_dim)
     
     def _build_default_model(self, hidden_dim):
-        """기본 모델 구조 생성"""
-        # feature extractor (hidden layers)
-        self.feature_net = nn.Sequential(
-            nn.Linear(self.input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-        ).to(self.device)
-        
-        # 출력층
+        """기본 모델 구조 생성 (레이어별 분리 저장)"""
+        self.num_layers = 2
+        self.hidden_dim = hidden_dim
+
+        # 레이어별로 분리하여 저장 (freeze 제어용)
+        self.layer_list = nn.ModuleList([
+            nn.Sequential(nn.Linear(self.input_dim, hidden_dim), nn.ReLU()),
+            nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU()),
+        ]).to(self.device)
+
+        # feature_net: layer_list를 순차적으로 적용하는 wrapper
+        self.feature_net = nn.Sequential(*self.layer_list).to(self.device)
+
+        # 출력층 (항상 학습)
         self.out_layer = nn.Linear(hidden_dim, 1, bias=False).to(self.device)
-        
+
         # 전체 모델
         self.model = nn.Sequential(self.feature_net, self.out_layer)
-        
+
         # float32로 설정
+        self.layer_list = self.layer_list.float()
         self.feature_net = self.feature_net.float()
         self.out_layer = self.out_layer.float()
         self.model = self.model.float()
     
     def _build_dynamic_model(self, params: Dict):
-        """동적 모델 구조 생성 (BO 결과 기반)"""
-        layers = []
-        
+        """동적 모델 구조 생성 (BO 결과 기반, 레이어별 분리 저장)"""
+        self.num_layers = params['hidden_layers']
+        self.hidden_dim = params['hidden_dim']
+
+        # 레이어별로 분리하여 저장 (freeze 제어용)
+        layer_modules = []
+
         # 첫 번째 레이어
-        layers.append(nn.Linear(self.input_dim, params['hidden_dim']))
-        layers.append(nn.ReLU())
-        
+        layer_modules.append(
+            nn.Sequential(nn.Linear(self.input_dim, params['hidden_dim']), nn.ReLU())
+        )
+
         # 중간 레이어들
         for _ in range(params['hidden_layers'] - 1):
-            layers.append(nn.Linear(params['hidden_dim'], params['hidden_dim']))
-            layers.append(nn.ReLU())
-        
-        self.feature_net = nn.Sequential(*layers).to(self.device)
+            layer_modules.append(
+                nn.Sequential(nn.Linear(params['hidden_dim'], params['hidden_dim']), nn.ReLU())
+            )
+
+        self.layer_list = nn.ModuleList(layer_modules).to(self.device)
+        self.feature_net = nn.Sequential(*self.layer_list).to(self.device)
         self.out_layer = nn.Linear(params['hidden_dim'], 1, bias=False).to(self.device)
         self.model = nn.Sequential(self.feature_net, self.out_layer)
-        
+
         # float32로 설정
+        self.layer_list = self.layer_list.float()
         self.feature_net = self.feature_net.float()
         self.out_layer = self.out_layer.float()
         self.model = self.model.float()
@@ -85,11 +106,50 @@ class TransferLearningDNN:
         """검증 데이터 분할"""
         if len(X) < 3:  # 데이터가 너무 적으면 분할하지 않음
             return X, y, X, y
-        
+
         X_train, X_val, y_train, y_val = train_test_split(
             X, y, test_size=val_ratio, random_state=42
         )
         return X_train, y_train, X_val, y_val
+
+    def _apply_unfreeze_ratio(self, unfreeze_ratio: float):
+        """
+        unfreeze_ratio에 따라 레이어 동결/해동 적용
+
+        Args:
+            unfreeze_ratio: 0.0 ~ 1.0
+                - 0.0: 모든 feature_net 레이어 동결 (out_layer만 학습)
+                - 0.5: 뒤쪽 50% 레이어만 해동
+                - 1.0: 전체 해동 (Full fine-tuning)
+
+        동결 방식:
+            - 앞쪽 레이어부터 동결 (입력에 가까운 범용 표현)
+            - 뒤쪽 레이어는 해동 (task-specific 표현)
+        """
+        n_layers = len(self.layer_list)
+        n_unfreeze = int(n_layers * unfreeze_ratio)
+
+        # 앞쪽 레이어 동결, 뒤쪽 레이어 해동
+        for i, layer in enumerate(self.layer_list):
+            freeze = (i < n_layers - n_unfreeze)
+            for param in layer.parameters():
+                param.requires_grad = not freeze
+
+        # out_layer는 항상 학습
+        for param in self.out_layer.parameters():
+            param.requires_grad = True
+
+    def _get_trainable_parameters(self):
+        """현재 requires_grad=True인 파라미터만 반환"""
+        params = []
+        for layer in self.layer_list:
+            for param in layer.parameters():
+                if param.requires_grad:
+                    params.append(param)
+        for param in self.out_layer.parameters():
+            if param.requires_grad:
+                params.append(param)
+        return params
 
     def pretrain(self, X_low, y_low, epochs=50, lr=1e-3, verbose=False,
                  bo_trials=None, data_size='small',
@@ -167,7 +227,8 @@ class TransferLearningDNN:
 
     def finetune(self, X_high, y_high, epochs=50, lr=1e-4, verbose=False,
                  bo_trials=None, data_size='small',
-                 use_loocv=False, use_uncertainty_loss=False, uncertainty_weight=0.3):
+                 use_loocv=False, use_uncertainty_loss=False, uncertainty_weight=0.3,
+                 use_freeze=False, unfreeze_ratio=1.0):
         """
         High-fidelity 데이터로 finetune
 
@@ -182,6 +243,11 @@ class TransferLearningDNN:
             use_loocv: LOOCV 사용 여부
             use_uncertainty_loss: 불확실성 손실 사용 여부
             uncertainty_weight: 불확실성 손실 가중치
+            use_freeze: Freeze 기법 사용 여부 (False면 기존 방식: 전체 fine-tuning)
+            unfreeze_ratio: 해동할 레이어 비율 (0.0~1.0, use_freeze=True일 때만 적용)
+                - 0.0: 모든 feature_net 동결, out_layer만 학습
+                - 0.5: 뒤쪽 50% 레이어 해동
+                - 1.0: 전체 해동 (Full fine-tuning, 기존과 동일)
         """
         self.finetune_losses = []
         X_high = np.asarray(X_high, dtype=np.float32)
@@ -200,23 +266,16 @@ class TransferLearningDNN:
                 sample_input = torch.tensor(X_train[:1], dtype=torch.float32).to(self.device)
                 feature_dim = self.feature_net(sample_input).shape[1]
 
-            # BO 실행 (feature를 입력으로 사용)
-            X_train_features = self.extract_features(X_train)
-            X_val_features = self.extract_features(X_val)
-
             # Pretrain에서 결정된 구조를 고정
             fixed_structure = {
-                'hidden_layers': self.pretrain_best_params.get('hidden_layers', 2),
-                'hidden_dim': self.pretrain_best_params.get('hidden_dim', self.hidden_dim)
-            } if hasattr(self, 'pretrain_best_params') else {
-                'hidden_layers': 2,
-                'hidden_dim': feature_dim
+                'hidden_layers': self.pretrain_best_params.get('hidden_layers', 2) if self.pretrain_best_params else 2,
+                'hidden_dim': self.pretrain_best_params.get('hidden_dim', self.hidden_dim) if self.pretrain_best_params else self.hidden_dim
             }
 
             from .hyperparameter_optimization_optuna import optimize_dnn_hyperparameters_optuna
             best_params, best_performance, history = optimize_dnn_hyperparameters_optuna(
-                X_train_features, y_train, X_val_features, y_val,
-                input_dim=feature_dim,
+                X_train, y_train, X_val, y_val,
+                input_dim=self.input_dim,
                 n_trials=bo_trials,
                 data_size=data_size,
                 device=self.device,
@@ -225,26 +284,41 @@ class TransferLearningDNN:
                 verbose=verbose,
                 use_loocv=use_loocv,
                 use_uncertainty_loss=use_uncertainty_loss,
-                uncertainty_weight=uncertainty_weight
+                uncertainty_weight=uncertainty_weight,
+                use_freeze=use_freeze,  # freeze 모드 전달
+                model_for_freeze=self if use_freeze else None  # freeze 모드일 때 모델 전달
             )
-            
+
             self.finetune_best_params = best_params
             self.finetune_bo_history = history
-            
-            
-            # 최적 하이퍼파라미터로 출력층만 재구성 (feature extractor는 유지)
-            self.out_layer = nn.Linear(feature_dim, 1, bias=False).to(self.device).float()
-            self.model = nn.Sequential(self.feature_net, self.out_layer)
-            
+
             epochs = best_params['epochs']
             lr = best_params['learning_rate']
-        
+
+            # use_freeze 모드에서 unfreeze_ratio가 BO로 결정됨
+            if use_freeze and 'unfreeze_ratio' in best_params:
+                unfreeze_ratio = best_params['unfreeze_ratio']
+                if verbose:
+                    print(f"    - Optimal unfreeze_ratio: {unfreeze_ratio:.2f}")
+
+        # Freeze 적용 (use_freeze=True일 때만)
+        if use_freeze:
+            self._apply_unfreeze_ratio(unfreeze_ratio)
+            trainable_params = self._get_trainable_parameters()
+            if verbose:
+                n_frozen = sum(1 for layer in self.layer_list for p in layer.parameters() if not p.requires_grad)
+                n_total = sum(1 for layer in self.layer_list for p in layer.parameters())
+                print(f"    - Freeze applied: {n_frozen}/{n_total} layer params frozen (unfreeze_ratio={unfreeze_ratio:.2f})")
+        else:
+            # 기존 방식: 모든 파라미터 학습
+            trainable_params = list(self.feature_net.parameters()) + list(self.out_layer.parameters())
+
         # 전체 데이터로 최종 학습
         X_tensor = torch.tensor(X_high, dtype=torch.float32).to(self.device)
         y_tensor = torch.tensor(y_high, dtype=torch.float32).view(-1, 1).to(self.device)
-        optimizer = optim.Adam(list(self.feature_net.parameters()) + list(self.out_layer.parameters()), lr=lr)
+        optimizer = optim.Adam(trainable_params, lr=lr)
         loss_fn = nn.MSELoss()
-        
+
         self.model.train()
         for epoch in range(epochs):
             optimizer.zero_grad()
@@ -254,6 +328,12 @@ class TransferLearningDNN:
             loss.backward()
             optimizer.step()
             self.finetune_losses.append(loss.item())
+
+        # 학습 후 모든 파라미터 requires_grad 복원 (다음 iteration을 위해)
+        if use_freeze:
+            for layer in self.layer_list:
+                for param in layer.parameters():
+                    param.requires_grad = True
             
 
     def predict(self, X):

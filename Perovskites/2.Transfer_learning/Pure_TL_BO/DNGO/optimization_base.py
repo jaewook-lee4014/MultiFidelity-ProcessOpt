@@ -54,7 +54,8 @@ def train_model(X_low: np.ndarray, y_low: np.ndarray, X_high: np.ndarray, y_high
                 verbose: bool = False, model_type: str = 'DNGO', hidden_dims: list = None,
                 incremental_params: Dict = None,
                 use_loocv: bool = False, use_uncertainty_loss: bool = False,
-                uncertainty_weight: float = 0.3):
+                uncertainty_weight: float = 0.3,
+                use_freeze: bool = False, unfreeze_ratio: float = 1.0):
     """
     Universal Transfer Learning 모델 학습 (DNGO/BNN 모두 지원, 하이퍼파라미터 BO 지원)
 
@@ -81,6 +82,8 @@ def train_model(X_low: np.ndarray, y_low: np.ndarray, X_high: np.ndarray, y_high
         use_loocv: HP 최적화 시 LOOCV 사용 여부
         use_uncertainty_loss: HP 최적화 시 불확실성 손실 사용 여부
         uncertainty_weight: 불확실성 손실 가중치
+        use_freeze: Freeze 기법 사용 여부 (finetune 시 레이어 부분 동결)
+        unfreeze_ratio: 해동할 레이어 비율 (0.0~1.0, use_freeze=True일 때만 적용)
 
     Returns:
         학습된 TransferLearningDNN 또는 TransferLearningBNN 모델
@@ -142,12 +145,14 @@ def train_model(X_low: np.ndarray, y_low: np.ndarray, X_high: np.ndarray, y_high
                 epochs=finetune_epochs, lr=finetune_lr, verbose=verbose,
                 bo_trials=finetune_bo_trials, data_size=data_size,
                 use_loocv=use_loocv, use_uncertainty_loss=use_uncertainty_loss,
-                uncertainty_weight=uncertainty_weight
+                uncertainty_weight=uncertainty_weight,
+                use_freeze=use_freeze, unfreeze_ratio=unfreeze_ratio
             )
         else:
             model.finetune(
                 X_high, y_high,
-                epochs=finetune_epochs, lr=finetune_lr, verbose=verbose
+                epochs=finetune_epochs, lr=finetune_lr, verbose=verbose,
+                use_freeze=use_freeze, unfreeze_ratio=unfreeze_ratio
             )
 
     return model
@@ -333,7 +338,9 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
                            incremental_params: Dict = None,
                            use_loocv: bool = False,
                            use_uncertainty_loss: bool = False,
-                           uncertainty_weight: float = 0.3) -> Dict:
+                           uncertainty_weight: float = 0.3,
+                           use_freeze: bool = False,
+                           unfreeze_ratio: float = 1.0) -> Dict:
     """
     범용 단일 최적화 실행 (DNGO/BNN 모두 지원, 하이퍼파라미터 BO 지원)
 
@@ -358,6 +365,8 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
         use_loocv: HP 최적화 시 LOOCV 사용 여부
         use_uncertainty_loss: HP 최적화 시 불확실성 손실 사용 여부
         uncertainty_weight: 불확실성 손실 가중치
+        use_freeze: Freeze 기법 사용 여부 (finetune 시 레이어 부분 동결)
+        unfreeze_ratio: 해동할 레이어 비율 (0.0~1.0, BO 사용 시 자동 최적화)
 
     Returns:
         결과 딕셔너리 (비용, best_so_far 곡선, 시간 등)
@@ -509,7 +518,9 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
                 incremental_params=incremental_params,
                 use_loocv=use_loocv,
                 use_uncertainty_loss=use_uncertainty_loss,
-                uncertainty_weight=uncertainty_weight
+                uncertainty_weight=uncertainty_weight,
+                use_freeze=use_freeze,
+                unfreeze_ratio=unfreeze_ratio
             )
             
             # 최적화된 파라미터 저장
@@ -564,7 +575,8 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
                     # Finetune with optimized parameters (DNGO)
                     if len(X_high) > 0 and finetune_params:
                         # Feature extractor는 유지하고 출력층만 재구성
-                        feature_dim = model.feature_net[-2].out_features  # 마지막 hidden layer의 출력 차원
+                        # feature_net[-1]은 nn.Sequential(Linear, ReLU)이므로 [0]으로 Linear 접근
+                        feature_dim = model.feature_net[-1][0].out_features  # 마지막 hidden layer의 출력 차원
                         model.out_layer = nn.Linear(feature_dim, 1, bias=False).to(model.device).float()
                         model.model = nn.Sequential(model.feature_net, model.out_layer)
                         
@@ -632,7 +644,9 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
                     verbose=False,
                     model_type=model_type,
                     hidden_dims=hidden_dims_param,
-                    incremental_params=incremental_params
+                    incremental_params=incremental_params,
+                    use_freeze=use_freeze,
+                    unfreeze_ratio=unfreeze_ratio
                 )
             
         
@@ -818,7 +832,9 @@ def multiple_optimization_runs(param_space: Dict, label_maps: Dict, lookup: Dict
                               incremental_params: Dict = None,
                               use_loocv: bool = False,
                               use_uncertainty_loss: bool = False,
-                              uncertainty_weight: float = 0.3) -> List[Dict]:
+                              uncertainty_weight: float = 0.3,
+                              use_freeze: bool = False,
+                              unfreeze_ratio: float = 1.0) -> List[Dict]:
     """
     범용 다중 최적화 실행 (DNGO/BNN 모두 지원, 하이퍼파라미터 BO 지원)
     """
@@ -854,7 +870,9 @@ def multiple_optimization_runs(param_space: Dict, label_maps: Dict, lookup: Dict
             incremental_params=incremental_params,
             use_loocv=use_loocv,
             use_uncertainty_loss=use_uncertainty_loss,
-            uncertainty_weight=uncertainty_weight
+            uncertainty_weight=uncertainty_weight,
+            use_freeze=use_freeze,
+            unfreeze_ratio=unfreeze_ratio
         )
         
         all_results.append(result)

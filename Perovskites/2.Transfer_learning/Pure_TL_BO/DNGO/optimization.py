@@ -191,7 +191,8 @@ def train_dngo_ol_models(X_low: np.ndarray, y_low: np.ndarray, X_high: np.ndarra
                         use_hyperparameter_bo: bool = False, pretrain_bo_trials: int = 0,
                         finetune_bo_trials: int = 0, data_size: str = 'small',
                         use_loocv: bool = False, use_uncertainty_loss: bool = False,
-                        uncertainty_weight: float = 0.3) -> Tuple:
+                        uncertainty_weight: float = 0.3,
+                        use_freeze: bool = False, unfreeze_ratio: float = 1.0) -> Tuple:
     """
     DNGO-OL 모델 학습 (온라인 학습 지원, 하이퍼파라미터 BO 지원)
 
@@ -203,6 +204,8 @@ def train_dngo_ol_models(X_low: np.ndarray, y_low: np.ndarray, X_high: np.ndarra
         use_loocv: HP 최적화 시 LOOCV 사용 여부
         use_uncertainty_loss: HP 최적화 시 불확실성 손실 사용 여부
         uncertainty_weight: 불확실성 손실 가중치
+        use_freeze: Freeze 기법 사용 여부
+        unfreeze_ratio: 해동할 레이어 비율 (0.0~1.0)
 
     Returns:
         (model, blr_L, blr_H): DNN 모델과 LOW/HIGH BLR 모델들
@@ -235,9 +238,11 @@ def train_dngo_ol_models(X_low: np.ndarray, y_low: np.ndarray, X_high: np.ndarra
             model.finetune(X_high, y_high, epochs=finetune_epochs, lr=finetune_lr, verbose=verbose,
                           bo_trials=finetune_bo_trials, data_size=data_size,
                           use_loocv=use_loocv, use_uncertainty_loss=use_uncertainty_loss,
-                          uncertainty_weight=uncertainty_weight)
+                          uncertainty_weight=uncertainty_weight,
+                          use_freeze=use_freeze, unfreeze_ratio=unfreeze_ratio)
         else:
-            model.finetune(X_high, y_high, epochs=finetune_epochs, lr=finetune_lr, verbose=verbose)
+            model.finetune(X_high, y_high, epochs=finetune_epochs, lr=finetune_lr, verbose=verbose,
+                          use_freeze=use_freeze, unfreeze_ratio=unfreeze_ratio)
         if verbose:
             print("✅ DNGO-OL: High-fidelity 미세조정 완료")
     
@@ -384,7 +389,8 @@ def single_optimization_run_dngo_ol(param_space: Dict, label_maps: Dict, lookup:
                                    pretrain_bo_trials: int = 0, finetune_bo_trials: int = 0,
                                    data_size: str = 'small',
                                    use_loocv: bool = False, use_uncertainty_loss: bool = False,
-                                   uncertainty_weight: float = 0.3) -> Dict:
+                                   uncertainty_weight: float = 0.3,
+                                   use_freeze: bool = False, unfreeze_ratio: float = 1.0) -> Dict:
     """
     DNGO-OL을 사용한 단일 최적화 실행 (하이퍼파라미터 BO 지원)
 
@@ -408,6 +414,8 @@ def single_optimization_run_dngo_ol(param_space: Dict, label_maps: Dict, lookup:
         use_loocv: HP 최적화 시 LOOCV 사용 여부
         use_uncertainty_loss: HP 최적화 시 불확실성 손실 사용 여부
         uncertainty_weight: 불확실성 손실 가중치
+        use_freeze: Freeze 기법 사용 여부
+        unfreeze_ratio: 해동할 레이어 비율 (0.0~1.0)
 
     Returns:
         결과 딕셔너리
@@ -497,7 +505,9 @@ def single_optimization_run_dngo_ol(param_space: Dict, label_maps: Dict, lookup:
         data_size=data_size,
         use_loocv=use_loocv,
         use_uncertainty_loss=use_uncertainty_loss,
-        uncertainty_weight=uncertainty_weight
+        uncertainty_weight=uncertainty_weight,
+        use_freeze=use_freeze,
+        unfreeze_ratio=unfreeze_ratio
     )
     
     if verbose:
@@ -624,7 +634,8 @@ def multiple_optimization_runs_dngo_ol(param_space: Dict, label_maps: Dict, look
                                       pretrain_bo_trials: int = 0, finetune_bo_trials: int = 0,
                                       data_size: str = 'small',
                                       use_loocv: bool = False, use_uncertainty_loss: bool = False,
-                                      uncertainty_weight: float = 0.3) -> List[Dict]:
+                                      uncertainty_weight: float = 0.3,
+                                      use_freeze: bool = False, unfreeze_ratio: float = 1.0) -> List[Dict]:
     """
     DNGO-OL을 사용한 다중 최적화 실행 (하이퍼파라미터 BO 지원)
     """
@@ -658,7 +669,9 @@ def multiple_optimization_runs_dngo_ol(param_space: Dict, label_maps: Dict, look
             data_size=data_size,
             use_loocv=use_loocv,
             use_uncertainty_loss=use_uncertainty_loss,
-            uncertainty_weight=uncertainty_weight
+            uncertainty_weight=uncertainty_weight,
+            use_freeze=use_freeze,
+            unfreeze_ratio=unfreeze_ratio
         )
         
         all_results.append(result)

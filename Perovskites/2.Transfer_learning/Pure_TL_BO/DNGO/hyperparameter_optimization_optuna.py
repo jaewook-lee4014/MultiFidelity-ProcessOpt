@@ -275,6 +275,86 @@ def evaluate_with_train_val_split(X_train: np.ndarray, y_train: np.ndarray,
     return mse
 
 
+def evaluate_with_freeze(model_for_freeze, X_train: np.ndarray, y_train: np.ndarray,
+                         X_val: np.ndarray, y_val: np.ndarray,
+                         unfreeze_ratio: float, learning_rate: float, epochs: int,
+                         device: str, trial: optuna.Trial) -> float:
+    """
+    Freeze 모드에서 unfreeze_ratio를 적용하여 모델 평가
+
+    pretrained 모델의 복사본을 만들어 unfreeze_ratio에 따라 레이어를 동결/해동하고
+    finetune하여 검증 손실을 반환합니다.
+
+    Args:
+        model_for_freeze: pretrained TransferLearningDNN 모델
+        X_train, y_train: 훈련 데이터
+        X_val, y_val: 검증 데이터
+        unfreeze_ratio: 해동할 레이어 비율 (0.0 ~ 1.0)
+        learning_rate: 학습률
+        epochs: epoch 수
+        device: 디바이스
+        trial: Optuna trial (pruning용)
+
+    Returns:
+        검증 손실 (MSE)
+    """
+    import copy
+
+    # 모델 복사 (원본 보존)
+    model_copy = copy.deepcopy(model_for_freeze)
+
+    # unfreeze_ratio 적용
+    model_copy._apply_unfreeze_ratio(unfreeze_ratio)
+
+    # 학습 가능한 파라미터만 추출
+    trainable_params = model_copy._get_trainable_parameters()
+
+    if len(trainable_params) == 0:
+        # 모든 파라미터가 동결된 경우 (unfreeze_ratio=0이고 out_layer도 없는 경우)
+        return float('inf')
+
+    # 데이터 준비
+    X_train_tensor = torch.tensor(X_train, dtype=torch.float32).to(device)
+    y_train_tensor = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(device)
+    X_val_tensor = torch.tensor(X_val, dtype=torch.float32).to(device)
+    y_val_tensor = torch.tensor(y_val, dtype=torch.float32).view(-1, 1).to(device)
+
+    optimizer = optim.Adam(trainable_params, lr=learning_rate)
+    criterion = nn.MSELoss()
+
+    # 학습
+    model_copy.model.train()
+    for epoch in range(epochs):
+        optimizer.zero_grad()
+        features = model_copy.feature_net(X_train_tensor)
+        pred = model_copy.out_layer(features)
+        loss = criterion(pred, y_train_tensor)
+        loss.backward()
+        optimizer.step()
+
+        # Pruning을 위한 중간 검증 (10 epoch마다)
+        if epoch % 10 == 0:
+            model_copy.model.eval()
+            with torch.no_grad():
+                val_features = model_copy.feature_net(X_val_tensor)
+                val_pred = model_copy.out_layer(val_features)
+                val_loss = criterion(val_pred, y_val_tensor).item()
+            model_copy.model.train()
+
+            trial.report(val_loss, epoch)
+            if trial.should_prune():
+                raise optuna.TrialPruned()
+
+    # 최종 평가
+    model_copy.model.eval()
+    with torch.no_grad():
+        val_features = model_copy.feature_net(X_val_tensor)
+        val_pred = model_copy.out_layer(val_features)
+        val_loss = criterion(val_pred, y_val_tensor).item()
+
+    return val_loss
+
+
 def create_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                            X_val: np.ndarray, y_val: np.ndarray,
                            input_dim: int, device: str, data_size: str,
@@ -283,7 +363,9 @@ def create_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                            optimize_incremental: bool = False,
                            use_loocv: bool = False,
                            use_uncertainty_loss: bool = False,
-                           uncertainty_weight: float = 0.3):
+                           uncertainty_weight: float = 0.3,
+                           use_freeze: bool = False,
+                           model_for_freeze = None):
     """
     Optuna objective function 생성
 
@@ -299,6 +381,8 @@ def create_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
         use_loocv: LOOCV 사용 여부 (True면 X_train+X_val 전체로 LOOCV)
         use_uncertainty_loss: 불확실성 calibration 손실 사용 여부
         uncertainty_weight: 불확실성 손실 가중치 (0~1)
+        use_freeze: Freeze 기법 사용 여부 (finetune 단계에서만 적용)
+        model_for_freeze: Freeze 평가를 위한 pretrained 모델 (use_freeze=True일 때 필요)
     """
     # LOOCV 사용 시 전체 데이터 병합
     if use_loocv:
@@ -341,6 +425,10 @@ def create_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
             else:  # large
                 learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-3, log=True)
                 epochs = trial.suggest_int('epochs', 100, 1000)
+
+            # Freeze 모드: unfreeze_ratio 최적화 (0.0 ~ 1.0)
+            if use_freeze:
+                unfreeze_ratio = trial.suggest_float('unfreeze_ratio', 0.0, 1.0)
         
         # Incremental learning 하이퍼파라미터 제안 (선택적)
         incremental_params = None
@@ -364,7 +452,13 @@ def create_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
         
         try:
             # 평가 방법 선택
-            if use_loocv and X_all is not None:
+            if use_freeze and stage == 'finetune' and model_for_freeze is not None:
+                # Freeze 모드: pretrained 모델을 사용하여 unfreeze_ratio 평가
+                val_loss = evaluate_with_freeze(
+                    model_for_freeze, X_train, y_train, X_val, y_val,
+                    unfreeze_ratio, learning_rate, epochs, device, trial
+                )
+            elif use_loocv and X_all is not None:
                 # LOOCV 사용
                 val_loss = evaluate_with_loocv(
                     X_all, y_all,
@@ -570,7 +664,9 @@ def optimize_dnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
                                         verbose: bool = True, optimize_incremental: bool = False,
                                         use_loocv: bool = False,
                                         use_uncertainty_loss: bool = False,
-                                        uncertainty_weight: float = 0.3) -> Tuple[Dict, float, List]:
+                                        uncertainty_weight: float = 0.3,
+                                        use_freeze: bool = False,
+                                        model_for_freeze = None) -> Tuple[Dict, float, List]:
     """
     Optuna를 사용한 DNN 하이퍼파라미터 베이지안 최적화
 
@@ -590,6 +686,8 @@ def optimize_dnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
         use_loocv: LOOCV 사용 여부 (기본: False, 기존 Train/Val 분할)
         use_uncertainty_loss: 불확실성 calibration 손실 사용 여부 (기본: False, 기존 MSE만)
         uncertainty_weight: 불확실성 손실 가중치 (기본: 0.3, L_total = 0.7*MSE + 0.3*L_uncertainty)
+        use_freeze: Freeze 기법 사용 여부 (finetune 단계에서 unfreeze_ratio 최적화)
+        model_for_freeze: Freeze 평가를 위한 pretrained 모델
 
     Returns:
         최적 하이퍼파라미터, 최적 성능, 전체 기록
@@ -615,7 +713,9 @@ def optimize_dnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
         stage, fixed_structure, optimize_incremental,
         use_loocv=use_loocv,
         use_uncertainty_loss=use_uncertainty_loss,
-        uncertainty_weight=uncertainty_weight
+        uncertainty_weight=uncertainty_weight,
+        use_freeze=use_freeze,
+        model_for_freeze=model_for_freeze
     )
     
     # 최적화 실행 with progress bar
@@ -623,6 +723,8 @@ def optimize_dnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
 
     # 평가 방법 문자열 생성
     eval_method = "LOOCV" if use_loocv else "Train/Val"
+    if use_freeze and stage == 'finetune':
+        eval_method = "Freeze"
     loss_type = f"MSE+Unc(w={uncertainty_weight})" if use_uncertainty_loss else "MSE"
 
     if verbose:
@@ -660,7 +762,10 @@ def optimize_dnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
         if stage == 'pretrain':
             print(f"      ✅ Best {stage_prefix} params: layers={best_params['hidden_layers']}, dim={best_params['hidden_dim']}, lr={best_params['learning_rate']:.1e}, epochs={best_params['epochs']}")
         else:
-            print(f"      ✅ Best {stage_prefix} params: lr={best_params['learning_rate']:.1e}, epochs={best_params['epochs']} (structure fixed)")
+            if use_freeze and 'unfreeze_ratio' in best_params:
+                print(f"      ✅ Best {stage_prefix} params: lr={best_params['learning_rate']:.1e}, epochs={best_params['epochs']}, unfreeze_ratio={best_params['unfreeze_ratio']:.2f}")
+            else:
+                print(f"      ✅ Best {stage_prefix} params: lr={best_params['learning_rate']:.1e}, epochs={best_params['epochs']} (structure fixed)")
         print(f"      ✅ Best loss: {best_performance:.4f} (eval: {eval_method}, loss: {loss_type})")
 
     return best_params, best_performance, trial_history

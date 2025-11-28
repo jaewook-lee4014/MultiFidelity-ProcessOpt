@@ -102,6 +102,12 @@ def parse_arguments():
                        help='HP 최적화 시 불확실성 calibration 손실 (L_uncertainty) 사용')
     parser.add_argument('--uncertainty-weight', type=float, default=0.3,
                        help='불확실성 손실 가중치 (0~1, L_total = (1-w)*MSE + w*L_uncertainty)')
+
+    # Freeze 옵션 (Transfer Learning)
+    parser.add_argument('--use-freeze', action='store_true',
+                       help='Finetune 시 레이어 부분 동결 (Freeze) 기법 사용')
+    parser.add_argument('--unfreeze-ratio', type=float, default=1.0,
+                       help='해동할 레이어 비율 (0.0~1.0, use-hyperparameter-bo 사용 시 자동 최적화)')
     
     # 점진적 학습 옵션
     parser.add_argument('--use-incremental-learning', action='store_true',
@@ -339,20 +345,16 @@ def main():
     # 설정 출력
     print_configuration(args, param_space, model_config, incremental_params)
     
-    # 하이퍼파라미터 BO 사용 시 경고
+    # 하이퍼파라미터 BO 사용 시 경고 (확인 없이 바로 실행)
     if args.use_hyperparameter_bo:
         total_bo_trials = args.pretrain_bo_trials + args.finetune_bo_trials
         estimated_time_per_iter = total_bo_trials * 2  # 대략적인 추정
         print(f"\n⚠️  WARNING: Hyperparameter BO is enabled!")
         print(f"   Each iteration may take ~{estimated_time_per_iter} times longer.")
         print(f"   Consider using smaller trial numbers for testing.")
-        
+
         if args.num_runs > 5:
             print(f"   Multiple runs with BO may take very long time!")
-            response = input("   Continue? (y/N): ")
-            if response.lower() != 'y':
-                print("   Aborted.")
-                return
     
     try:
         if args.num_runs == 1:
@@ -380,7 +382,9 @@ def main():
                     incremental_params=incremental_params,
                     use_loocv=args.use_loocv,
                     use_uncertainty_loss=args.use_uncertainty_loss,
-                    uncertainty_weight=args.uncertainty_weight
+                    uncertainty_weight=args.uncertainty_weight,
+                    use_freeze=args.use_freeze,
+                    unfreeze_ratio=args.unfreeze_ratio
                 )
             elif args.model_type == 'dngo-ol':
                 result = single_optimization_run_dngo_ol(
@@ -402,7 +406,9 @@ def main():
                     data_size=args.data_size,
                     use_loocv=args.use_loocv,
                     use_uncertainty_loss=args.use_uncertainty_loss,
-                    uncertainty_weight=args.uncertainty_weight
+                    uncertainty_weight=args.uncertainty_weight,
+                    use_freeze=args.use_freeze,
+                    unfreeze_ratio=args.unfreeze_ratio
                 )
             else:  # BNN
                 result = single_optimization_run(
@@ -425,7 +431,9 @@ def main():
                     incremental_params=incremental_params,
                     use_loocv=args.use_loocv,
                     use_uncertainty_loss=args.use_uncertainty_loss,
-                    uncertainty_weight=args.uncertainty_weight
+                    uncertainty_weight=args.uncertainty_weight,
+                    use_freeze=args.use_freeze,
+                    unfreeze_ratio=args.unfreeze_ratio
                 )
             
             # 결과 출력
@@ -521,7 +529,9 @@ def main():
                     incremental_params=incremental_params,
                     use_loocv=args.use_loocv,
                     use_uncertainty_loss=args.use_uncertainty_loss,
-                    uncertainty_weight=args.uncertainty_weight
+                    uncertainty_weight=args.uncertainty_weight,
+                    use_freeze=args.use_freeze,
+                    unfreeze_ratio=args.unfreeze_ratio
                 )
             elif args.model_type == 'dngo-ol':
                 results = multiple_optimization_runs_dngo_ol(
@@ -542,7 +552,9 @@ def main():
                     data_size=args.data_size,
                     use_loocv=args.use_loocv,
                     use_uncertainty_loss=args.use_uncertainty_loss,
-                    uncertainty_weight=args.uncertainty_weight
+                    uncertainty_weight=args.uncertainty_weight,
+                    use_freeze=args.use_freeze,
+                    unfreeze_ratio=args.unfreeze_ratio
                 )
             else:  # BNN
                 results = multiple_optimization_runs(
@@ -568,7 +580,9 @@ def main():
                     incremental_params=incremental_params,
                     use_loocv=args.use_loocv,
                     use_uncertainty_loss=args.use_uncertainty_loss,
-                    uncertainty_weight=args.uncertainty_weight
+                    uncertainty_weight=args.uncertainty_weight,
+                    use_freeze=args.use_freeze,
+                    unfreeze_ratio=args.unfreeze_ratio
                 )
             
             # 시각화

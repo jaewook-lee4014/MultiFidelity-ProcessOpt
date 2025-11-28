@@ -249,14 +249,73 @@ class TransferLearningBNN:
         if hasattr(torch, 'mps') and torch.mps.is_available():
             torch.mps.empty_cache()
         
-    def _build_feature_extractor(self, hidden_dim: int = 64):
-        """Build deterministic feature extractor (same as original)"""
-        self.feature_extractor = nn.Sequential(
-            nn.Linear(self.input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-        ).to(self.device).float()
+    def _build_feature_extractor(self, hidden_dim: int = 64, num_layers: int = 2):
+        """Build deterministic feature extractor with ModuleList for layer-wise freeze control"""
+        # Use ModuleList for layer-wise control (similar to DNGO)
+        self.feature_layer_list = nn.ModuleList()
+
+        prev_dim = self.input_dim
+        for i in range(num_layers):
+            layer = nn.Sequential(
+                nn.Linear(prev_dim, hidden_dim),
+                nn.ReLU()
+            )
+            self.feature_layer_list.append(layer)
+            prev_dim = hidden_dim
+
+        self.feature_layer_list = self.feature_layer_list.to(self.device).float()
+
+        # Create sequential wrapper for compatibility
+        self.feature_extractor = nn.Sequential(*self.feature_layer_list).to(self.device).float()
+
+    def _apply_unfreeze_ratio_to_feature_extractor(self, unfreeze_ratio: float):
+        """
+        Apply unfreeze ratio to feature extractor layers.
+
+        unfreeze_ratio = 0.0: Freeze all feature_extractor layers (only BNN learns)
+        unfreeze_ratio = 1.0: Full fine-tuning (all layers learn)
+
+        Freezes layers from the front (input side).
+        """
+        if not hasattr(self, 'feature_layer_list') or self.feature_layer_list is None:
+            return
+
+        n_layers = len(self.feature_layer_list)
+        n_unfreeze = int(n_layers * unfreeze_ratio)
+        n_unfreeze = max(0, min(n_layers, n_unfreeze))  # Clamp to valid range
+
+        frozen_count = 0
+        unfrozen_count = 0
+
+        for i, layer in enumerate(self.feature_layer_list):
+            # Freeze from the front: layers 0, 1, ... are frozen first
+            freeze = (i < n_layers - n_unfreeze)
+            for param in layer.parameters():
+                param.requires_grad = not freeze
+                if freeze:
+                    frozen_count += 1
+                else:
+                    unfrozen_count += 1
+
+        return frozen_count, unfrozen_count
+
+    def _get_trainable_parameters_for_finetune(self, include_bnn: bool = True):
+        """Get trainable parameters for finetuning (respecting freeze settings)"""
+        params = []
+
+        # Feature extractor parameters (may be partially frozen)
+        if hasattr(self, 'feature_layer_list') and self.feature_layer_list is not None:
+            for layer in self.feature_layer_list:
+                for param in layer.parameters():
+                    if param.requires_grad:
+                        params.append(param)
+
+        # BNN parameters (always trainable during finetune)
+        if include_bnn and self.bnn is not None:
+            for param in self.bnn.parameters():
+                params.append(param)
+
+        return params
     
     def pretrain(self, X_low: np.ndarray, y_low: np.ndarray,
                  epochs: int = 200, lr: float = 1e-3, verbose: bool = False,
@@ -413,8 +472,14 @@ class TransferLearningBNN:
                  kl_warmup_epochs: int = 10, verbose: bool = False,
                  bo_trials: Optional[int] = None, data_size: str = 'small',
                  use_loocv: bool = False, use_uncertainty_loss: bool = False,
-                 uncertainty_weight: float = 0.3):
-        """Finetune with BNN on high-fidelity data"""
+                 uncertainty_weight: float = 0.3,
+                 use_freeze: bool = False, unfreeze_ratio: float = 1.0):
+        """Finetune with BNN on high-fidelity data
+
+        Args:
+            use_freeze: If True, apply layer freezing to feature_extractor
+            unfreeze_ratio: Ratio of layers to unfreeze (0.0=all frozen, 1.0=all trainable)
+        """
         self.finetune_losses = []
         X_high = np.asarray(X_high, dtype=np.float32)
         y_high = np.asarray(y_high, dtype=np.float32).flatten()
@@ -422,10 +487,20 @@ class TransferLearningBNN:
         if verbose:
             print(f"Finetune BNN with {len(X_high)} high-fidelity samples")
 
-        # Extract features using pretrained feature extractor
+        # Build feature extractor if not exists
         if self.feature_extractor is None:
             self._build_feature_extractor()
 
+        # Apply freeze to feature extractor if requested
+        if use_freeze:
+            result = self._apply_unfreeze_ratio_to_feature_extractor(unfreeze_ratio)
+            if result is not None and verbose:
+                frozen_count, unfrozen_count = result
+                n_layers = len(self.feature_layer_list) if hasattr(self, 'feature_layer_list') else 0
+                n_unfreeze = int(n_layers * unfreeze_ratio)
+                print(f"    Freeze applied to feature_extractor: {n_layers - n_unfreeze}/{n_layers} layers frozen (unfreeze_ratio={unfreeze_ratio:.2f})")
+
+        # Get feature dimension
         with torch.no_grad():
             X_tensor = torch.tensor(X_high, dtype=torch.float32).to(self.device)
             features = self.feature_extractor(X_tensor)
@@ -474,14 +549,14 @@ class TransferLearningBNN:
                 use_uncertainty_loss=use_uncertainty_loss,
                 uncertainty_weight=uncertainty_weight
             )
-            
+
             self.finetune_best_params = best_params
             self.finetune_bo_history = history
-            
+
             if verbose:
                 print(f"✅ 최적 BNN 파라미터: {best_params}")
                 print(f"✅ 최적 성능: {best_performance:.4f}")
-            
+
             # 최적 하이퍼파라미터로 모델 구성
             # finetune에서는 hidden_dims는 pretrain에서 결정된 값 유지
             if 'hidden_dims' in best_params:
@@ -492,7 +567,7 @@ class TransferLearningBNN:
             lr = best_params['finetune_lr']
             kl_weight = best_params.get('kl_weight', self.kl_weight)
             kl_warmup_epochs = best_params.get('kl_warmup_epochs', self.kl_warmup_epochs)
-        
+
         # Build BNN
         self.bnn = BayesianNeuralNetwork(
             input_dim=feature_dim,
@@ -500,39 +575,54 @@ class TransferLearningBNN:
             prior_std=self.prior_std,
             noise_type=self.noise_type
         ).to(self.device)
-        
-        # Training
-        features_np = features.cpu().numpy()
-        X_tensor = torch.tensor(features_np, dtype=torch.float32).to(self.device)
+
+        # Prepare data tensor (raw input, will pass through feature_extractor during training)
+        X_raw_tensor = torch.tensor(X_high, dtype=torch.float32).to(self.device)
         y_tensor = torch.tensor(y_high, dtype=torch.float32).view(-1, 1).to(self.device)
-        
-        optimizer = optim.Adam(self.bnn.parameters(), lr=lr)
-        
+
+        # Set up optimizer with trainable parameters
+        if use_freeze:
+            # Get trainable parameters from feature_extractor + all BNN parameters
+            trainable_params = self._get_trainable_parameters_for_finetune(include_bnn=True)
+            optimizer = optim.Adam(trainable_params, lr=lr)
+            # Set feature_extractor to train mode (but frozen layers won't update)
+            self.feature_extractor.train()
+        else:
+            # Original behavior: only BNN learns, feature_extractor is fixed
+            optimizer = optim.Adam(self.bnn.parameters(), lr=lr)
+
         self.bnn.train()
         for epoch in range(epochs):
             optimizer.zero_grad()
-            
-            # Forward pass
-            pred_mean, pred_var = self.bnn(X_tensor)
-            
+
+            # Forward pass through feature extractor (with gradient if use_freeze)
+            if use_freeze:
+                features = self.feature_extractor(X_raw_tensor)
+            else:
+                with torch.no_grad():
+                    features = self.feature_extractor(X_raw_tensor)
+
+            # Forward pass through BNN
+            pred_mean, pred_var = self.bnn(features)
+
             # Negative log likelihood (NLL)
             nll = 0.5 * torch.log(2 * math.pi * pred_var) + 0.5 * (y_tensor - pred_mean).pow(2) / pred_var
             nll = nll.mean()
-            
+
             # KL divergence with warm-up
             kl_div = self.bnn.kl_divergence()
             kl_weight_current = min(1.0, (epoch + 1) / kl_warmup_epochs) * kl_weight / len(X_high)
-            
+
             # ELBO loss
             loss = nll + kl_weight_current * kl_div
-            
+
             loss.backward()
             optimizer.step()
             self.finetune_losses.append(loss.item())
-            
+
             if verbose and (epoch + 1) % max(1, epochs // 10) == 0:
                 print(f'[Finetune] Epoch {epoch+1}/{epochs}: Loss {loss.item():.4f}, NLL {nll.item():.4f}, KL {kl_div.item():.4f}')
-        
+
         # 학습 완료 후 캐시 정리
         self._clear_cache()
         self.fitted = True
