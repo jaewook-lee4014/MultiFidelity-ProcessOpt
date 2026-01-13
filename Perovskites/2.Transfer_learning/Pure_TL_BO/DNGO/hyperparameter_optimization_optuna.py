@@ -84,7 +84,8 @@ def compute_uncertainty_loss(errors: np.ndarray, uncertainties: np.ndarray) -> f
 def evaluate_with_loocv(X: np.ndarray, y: np.ndarray,
                         hidden_layers: int, hidden_dim: int,
                         learning_rate: float, epochs: int,
-                        device: str, use_uncertainty_loss: bool = False,
+                        device: str, batch_size: int = None,
+                        use_uncertainty_loss: bool = False,
                         uncertainty_weight: float = 0.3) -> float:
     """
     LOOCV (Leave-One-Out Cross Validation)를 사용한 모델 평가
@@ -97,6 +98,7 @@ def evaluate_with_loocv(X: np.ndarray, y: np.ndarray,
         learning_rate: 학습률
         epochs: epoch 수
         device: 디바이스
+        batch_size: 미니배치 크기 (None이면 전체 배치)
         use_uncertainty_loss: 불확실성 손실 사용 여부
         uncertainty_weight: 불확실성 손실 가중치 (0~1)
 
@@ -124,15 +126,23 @@ def evaluate_with_loocv(X: np.ndarray, y: np.ndarray,
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
         criterion = nn.MSELoss()
 
-        # 학습 (짧은 epoch - LOOCV는 n번 반복하므로)
-        reduced_epochs = max(epochs // 3, 20)  # epoch 수 감소
+        # 학습 (미니배치 지원)
         model.train()
-        for _ in range(reduced_epochs):
-            optimizer.zero_grad()
-            pred = model(X_train_tensor)
-            loss = criterion(pred, y_train_tensor)
-            loss.backward()
-            optimizer.step()
+        n_train = len(X_train)
+        actual_batch_size = batch_size if batch_size is not None else n_train
+
+        for _ in range(epochs):
+            # 미니배치 학습
+            indices = np.random.permutation(n_train)
+            for start_idx in range(0, n_train, actual_batch_size):
+                end_idx = min(start_idx + actual_batch_size, n_train)
+                batch_indices = indices[start_idx:end_idx]
+
+                optimizer.zero_grad()
+                pred = model(X_train_tensor[batch_indices])
+                loss = criterion(pred, y_train_tensor[batch_indices])
+                loss.backward()
+                optimizer.step()
 
         # 예측
         model.eval()
@@ -185,6 +195,7 @@ def evaluate_with_train_val_split(X_train: np.ndarray, y_train: np.ndarray,
                                    hidden_layers: int, hidden_dim: int,
                                    learning_rate: float, epochs: int,
                                    device: str, trial: optuna.Trial,
+                                   batch_size: int = None,
                                    use_uncertainty_loss: bool = False,
                                    uncertainty_weight: float = 0.3) -> float:
     """
@@ -199,6 +210,7 @@ def evaluate_with_train_val_split(X_train: np.ndarray, y_train: np.ndarray,
         epochs: epoch 수
         device: 디바이스
         trial: Optuna trial (pruning용)
+        batch_size: 미니배치 크기 (None이면 전체 배치)
         use_uncertainty_loss: 불확실성 손실 사용 여부
         uncertainty_weight: 불확실성 손실 가중치
 
@@ -217,14 +229,23 @@ def evaluate_with_train_val_split(X_train: np.ndarray, y_train: np.ndarray,
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
 
-    # 학습
+    # 학습 (미니배치 지원)
+    n_train = len(X_train)
+    actual_batch_size = batch_size if batch_size is not None else n_train
+
     model.train()
     for epoch in range(epochs):
-        optimizer.zero_grad()
-        pred = model(X_train_tensor)
-        loss = criterion(pred, y_train_tensor)
-        loss.backward()
-        optimizer.step()
+        # 미니배치 학습
+        indices = np.random.permutation(n_train)
+        for start_idx in range(0, n_train, actual_batch_size):
+            end_idx = min(start_idx + actual_batch_size, n_train)
+            batch_indices = indices[start_idx:end_idx]
+
+            optimizer.zero_grad()
+            pred = model(X_train_tensor[batch_indices])
+            loss = criterion(pred, y_train_tensor[batch_indices])
+            loss.backward()
+            optimizer.step()
 
         # Pruning을 위한 중간 검증 (10 epoch마다)
         if epoch % 10 == 0:
@@ -395,36 +416,25 @@ def create_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
     def objective(trial):
         # Stage별 하이퍼파라미터 제안
         if stage == 'pretrain':
-            # Pretrain: 모든 파라미터 탐색
-            if data_size == 'small':
-                hidden_layers = trial.suggest_int('hidden_layers', 1, 3)
-                hidden_dim = trial.suggest_categorical('hidden_dim', [16, 32, 64, 128])
-                learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)
-                epochs = trial.suggest_int('epochs', 50, 200)
-            elif data_size == 'medium':
-                hidden_layers = trial.suggest_int('hidden_layers', 1, 4)
-                hidden_dim = trial.suggest_categorical('hidden_dim', [32, 64, 128, 256])
-                learning_rate = trial.suggest_float('learning_rate', 1e-5, 5e-3, log=True)
-                epochs = trial.suggest_int('epochs', 100, 500)
-            else:  # large
-                hidden_layers = trial.suggest_int('hidden_layers', 2, 5)
-                hidden_dim = trial.suggest_categorical('hidden_dim', [64, 128, 256, 512])
-                learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-3, log=True)
-                epochs = trial.suggest_int('epochs', 100, 1000)
+            # Pretrain 단계 하이퍼파라미터 (확장된 탐색 공간)
+            hidden_layers = trial.suggest_int('hidden_layers', 1, 4)
+            hidden_dim = trial.suggest_categorical('hidden_dim', [32, 64, 128, 256])
+            learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)
+            # epochs 범위 확장: 20 ~ 500
+            epochs = trial.suggest_int('epochs', 20, 500)
+            # batch_size 추가 (넓은 범위)
+            batch_size = trial.suggest_categorical('batch_size', [8, 16, 32, 64, 128, 256, 512])
         else:
             # Finetune: learning_rate와 epochs만 탐색, 구조는 고정
             hidden_layers = fixed_structure['hidden_layers']
             hidden_dim = fixed_structure['hidden_dim']
 
-            if data_size == 'small':
-                learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)
-                epochs = trial.suggest_int('epochs', 50, 200)
-            elif data_size == 'medium':
-                learning_rate = trial.suggest_float('learning_rate', 1e-5, 5e-3, log=True)
-                epochs = trial.suggest_int('epochs', 100, 500)
-            else:  # large
-                learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-3, log=True)
-                epochs = trial.suggest_int('epochs', 100, 1000)
+            # Finetune 단계 하이퍼파라미터 (확장된 탐색 공간)
+            learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-3, log=True)
+            # epochs 범위 확장: 20 ~ 500
+            epochs = trial.suggest_int('epochs', 20, 500)
+            # batch_size 추가 (넓은 범위)
+            batch_size = trial.suggest_categorical('batch_size', [8, 16, 32, 64, 128, 256, 512])
 
             # Freeze 모드: unfreeze_ratio 최적화 (0.0 ~ 1.0)
             if use_freeze:
@@ -464,7 +474,7 @@ def create_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                     X_all, y_all,
                     hidden_layers, hidden_dim,
                     learning_rate, epochs,
-                    device,
+                    device, batch_size=batch_size,
                     use_uncertainty_loss=use_uncertainty_loss,
                     uncertainty_weight=uncertainty_weight
                 )
@@ -481,7 +491,7 @@ def create_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                     X_train, y_train, X_val, y_val,
                     hidden_layers, hidden_dim,
                     learning_rate, epochs,
-                    device, trial,
+                    device, trial, batch_size=batch_size,
                     use_uncertainty_loss=use_uncertainty_loss,
                     uncertainty_weight=uncertainty_weight
                 )
@@ -741,6 +751,12 @@ def optimize_dnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
                 })
                 pbar.update(1)
 
+                # Trial 상세 로그 출력
+                if trial.value is not None:
+                    params_str = ", ".join([f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}"
+                                           for k, v in trial.params.items()])
+                    print(f"        [Trial {trial.number+1}/{n_trials}] {params_str} → loss={trial.value:.4f}", flush=True)
+
             study.optimize(objective, n_trials=n_trials, callbacks=[callback])
     else:
         optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -759,13 +775,14 @@ def optimize_dnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
             trial_history.append(record)
 
     if verbose:
+        batch_str = f", batch={best_params.get('batch_size', 'full')}"
         if stage == 'pretrain':
-            print(f"      ✅ Best {stage_prefix} params: layers={best_params['hidden_layers']}, dim={best_params['hidden_dim']}, lr={best_params['learning_rate']:.1e}, epochs={best_params['epochs']}")
+            print(f"      ✅ Best {stage_prefix} params: layers={best_params['hidden_layers']}, dim={best_params['hidden_dim']}, lr={best_params['learning_rate']:.1e}, epochs={best_params['epochs']}{batch_str}")
         else:
             if use_freeze and 'unfreeze_ratio' in best_params:
-                print(f"      ✅ Best {stage_prefix} params: lr={best_params['learning_rate']:.1e}, epochs={best_params['epochs']}, unfreeze_ratio={best_params['unfreeze_ratio']:.2f}")
+                print(f"      ✅ Best {stage_prefix} params: lr={best_params['learning_rate']:.1e}, epochs={best_params['epochs']}{batch_str}, unfreeze_ratio={best_params['unfreeze_ratio']:.2f}")
             else:
-                print(f"      ✅ Best {stage_prefix} params: lr={best_params['learning_rate']:.1e}, epochs={best_params['epochs']} (structure fixed)")
+                print(f"      ✅ Best {stage_prefix} params: lr={best_params['learning_rate']:.1e}, epochs={best_params['epochs']}{batch_str} (structure fixed)")
         print(f"      ✅ Best loss: {best_performance:.4f} (eval: {eval_method}, loss: {loss_type})")
 
     return best_params, best_performance, trial_history

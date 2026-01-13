@@ -1,0 +1,31 @@
+{
+  "organic": {
+    "ethylammonium": 1,
+    "propylammonium": 2,
+    "butylammonium": 3,
+    "isopropylammonium": 4,
+    "dimethylammonium": 5,
+    "acetamidinium": 6,
+    "methylammonium": 7,
+    "guanidinium": 8,
+    "hydroxylammonium": 9,
+    "formamidinium": 10,
+    "tetramethylammonium": 11,
+    "hydrazinium": 12,
+    "ammonium": 13,
+    "trimethylammonium": 14,
+    "azetidinium": 15,
+    "imidazolium": 16
+  },
+  "cation": {
+    "Ge": 1,
+    "Sn": 2,
+    "Pb": 3
+  },
+  "anion": {
+    "F": 1,
+    "Cl": 2,
+    "Br": 3,
+    "I": 4
+  }
+}

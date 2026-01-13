@@ -16,8 +16,8 @@ from collections import deque
 
 class OnlineBayesianLinearRegression:
     """온라인 학습을 위한 Bayesian Linear Regression 모델"""
-    
-    def __init__(self, alpha: float = 1.0, beta: float = 25.0, 
+
+    def __init__(self, alpha: float = 1.0, beta: float = 25.0,
                  forgetting_factor: float = 0.99, memory_size: int = 100):
         """
         Args:
@@ -30,11 +30,21 @@ class OnlineBayesianLinearRegression:
         self.beta = beta
         self.forgetting_factor = forgetting_factor
         self.memory_size = memory_size
-        
+
         self.mean = None
         self.cov = None
         self.memory_buffer = deque(maxlen=memory_size)
         self.n_samples = 0
+
+        # 학습 메트릭 추적
+        self.training_history = {
+            'prediction_errors': [],      # 예측 오차
+            'uncertainties': [],          # 불확실성 (분산)
+            'log_likelihoods': [],        # 로그 우도
+            'cov_trace': [],              # 공분산 행렬 trace (모델 확신도)
+            'update_timestamps': [],      # 업데이트 시점
+            'n_samples_history': []       # 샘플 수 기록
+        }
         
     def fit(self, Phi: np.ndarray, t: np.ndarray):
         """전체 데이터로 초기 학습"""
@@ -61,29 +71,42 @@ class OnlineBayesianLinearRegression:
             M = len(phi_new)
             self.cov = (1.0 / self.alpha) * np.eye(M)
             self.mean = np.zeros(M)
-        
+
+        # 업데이트 전 예측 (메트릭 기록용)
+        phi_flat = phi_new.flatten()
+        pred_before, var_before = self.predict(phi_flat)
+        prediction_error = float(t_new - pred_before)
+
         # 망각 계수 적용: 이전 정보의 영향력을 감소시킴
         self.cov = self.cov / self.forgetting_factor
-        
+
         # Sequential Bayesian update (Recursive Least Squares 형태)
         phi_new = phi_new.reshape(-1, 1)
-        
+
         # Kalman gain 계산
         k = self.beta * self.cov @ phi_new
         denominator = 1 + self.beta * phi_new.T @ self.cov @ phi_new
         k = k / denominator
-        
+
         # 평균 업데이트
-        prediction_error = t_new - phi_new.T @ self.mean
         self.mean = self.mean + k.flatten() * prediction_error
-        
+
         # 공분산 업데이트 (Joseph form for numerical stability)
         I = np.eye(len(self.mean))
         self.cov = (I - k @ phi_new.T) @ self.cov
-        
+
         # 메모리 버퍼에 추가
         self.memory_buffer.append((phi_new.flatten(), t_new))
         self.n_samples += 1
+
+        # 학습 메트릭 기록
+        log_likelihood = -0.5 * (prediction_error**2 * self.beta + np.log(2 * np.pi / self.beta))
+        self.training_history['prediction_errors'].append(prediction_error)
+        self.training_history['uncertainties'].append(float(var_before))
+        self.training_history['log_likelihoods'].append(float(log_likelihood))
+        self.training_history['cov_trace'].append(float(np.trace(self.cov)))
+        self.training_history['update_timestamps'].append(self.n_samples)
+        self.training_history['n_samples_history'].append(self.n_samples)
         
     def predict(self, phi: np.ndarray) -> Tuple[float, float]:
         """예측 평균과 분산 반환"""
@@ -117,59 +140,86 @@ class OnlineTransferLearningDNN(TransferLearningDNN):
             use_hyperparameter_bo: 하이퍼파라미터 BO 사용 여부
         """
         super().__init__(input_dim, hidden_dim, device, use_hyperparameter_bo=use_hyperparameter_bo)
-        
+
         self.replay_buffer_size = replay_buffer_size
         self.online_batch_size = online_batch_size
         self.online_epochs = online_epochs
-        
+
         # 리플레이 버퍼
         self.replay_buffer = {
             'low': deque(maxlen=replay_buffer_size),
             'high': deque(maxlen=replay_buffer_size)
         }
+
+        # 온라인 학습 메트릭 추적
+        self.online_training_history = {
+            'losses': [],                 # 온라인 업데이트 시 loss
+            'losses_per_epoch': [],       # 각 epoch별 loss
+            'update_counts': [],          # 업데이트 횟수
+            'fidelities': [],             # 각 업데이트의 fidelity
+            'buffer_sizes': [],           # 리플레이 버퍼 크기
+            'learning_rates': []          # 사용된 학습률
+        }
+        self.online_update_count = 0
         
-    def update_online(self, X_new: np.ndarray, y_new: np.ndarray, 
+    def update_online(self, X_new: np.ndarray, y_new: np.ndarray,
                      fidelity: str = 'high', lr: float = 1e-4):
         """새로운 데이터로 온라인 업데이트"""
-        
+        self.online_update_count += 1
+
         # 리플레이 버퍼에 추가
         for x, y in zip(X_new, y_new):
             self.replay_buffer[fidelity].append((x, y))
-        
+
         # 리플레이 버퍼에서 샘플링하여 미니배치 학습
+        epoch_losses = []
+        final_loss = None
+
         if len(self.replay_buffer[fidelity]) >= self.online_batch_size:
             optimizer = optim.Adam(self.model.parameters(), lr=lr)
             criterion = nn.MSELoss()
-            
+
             self.model.train()
-            
-            for _ in range(self.online_epochs):
+
+            for epoch in range(self.online_epochs):
                 # 랜덤 샘플링
                 indices = np.random.choice(
-                    len(self.replay_buffer[fidelity]), 
+                    len(self.replay_buffer[fidelity]),
                     size=min(self.online_batch_size, len(self.replay_buffer[fidelity])),
                     replace=False
                 )
-                
+
                 batch_data = [self.replay_buffer[fidelity][i] for i in indices]
                 X_batch = np.array([x for x, _ in batch_data])
                 y_batch = np.array([y for _, y in batch_data])
-                
+
                 # Tensor 변환
                 X_tensor = torch.FloatTensor(X_batch).to(self.device)
                 y_tensor = torch.FloatTensor(y_batch).to(self.device)
-                
+
                 # Forward pass
                 optimizer.zero_grad()
                 outputs = self.model(X_tensor).squeeze()
                 loss = criterion(outputs, y_tensor)
-                
+
                 # Backward pass
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 optimizer.step()
-                
+
+                # Loss 기록
+                epoch_losses.append(loss.item())
+
             self.model.eval()
+            final_loss = epoch_losses[-1] if epoch_losses else None
+
+        # 메트릭 기록
+        self.online_training_history['losses'].append(final_loss)
+        self.online_training_history['losses_per_epoch'].append(epoch_losses)
+        self.online_training_history['update_counts'].append(self.online_update_count)
+        self.online_training_history['fidelities'].append(fidelity)
+        self.online_training_history['buffer_sizes'].append(len(self.replay_buffer[fidelity]))
+        self.online_training_history['learning_rates'].append(lr)
 
 
 def expected_improvement(mu: np.ndarray, sigma: np.ndarray, y_best: float, xi: float = 0.01) -> np.ndarray:
@@ -553,7 +603,13 @@ def single_optimization_run_dngo_ol(param_space: Dict, label_maps: Dict, lookup:
         
         # 측정
         measurement = measure_from_label(next_x_label, s, label_maps, lookup)
-        
+
+        # BO iteration 로그 (항상 출력)
+        fid_str = "H" if s == 1.0 else "L"
+        print(f"  [Iter {iter_:3d}] point={next_x_label}, fid={fid_str}, "
+              f"EI={ei[best_idx]:.4f}, pred={y_pred[best_idx]:.3f}±{y_std[best_idx]:.3f}, "
+              f"actual={measurement:.4f}", flush=True)
+
         if verbose:
             print(f"Recommended: {next_x_label} (fidelity: {s})")
             print(f"Measurement: {measurement:.4f}")
@@ -602,7 +658,16 @@ def single_optimization_run_dngo_ol(param_space: Dict, label_maps: Dict, lookup:
     cost_history = [x[2] for x in cost_data]
     fidelity_history = [data['fidelity'] for data in visualization_data]
     ei_history = [data['ei'][data['best_idx']] for data in visualization_data]
-    
+
+    # 학습 메트릭 수집
+    training_history = {
+        'pretrain_losses': model.pretrain_losses if hasattr(model, 'pretrain_losses') else [],
+        'finetune_losses': model.finetune_losses if hasattr(model, 'finetune_losses') else [],
+        'online_dnn_history': model.online_training_history if hasattr(model, 'online_training_history') else {},
+        'blr_L_history': blr_L.training_history if hasattr(blr_L, 'training_history') else {},
+        'blr_H_history': blr_H.training_history if hasattr(blr_H, 'training_history') else {},
+    }
+
     return {
         'total_cost': total_cost,
         'best_so_far': best_so_far,
@@ -620,7 +685,14 @@ def single_optimization_run_dngo_ol(param_space: Dict, label_maps: Dict, lookup:
         'best_values_history': best_values_history,
         'cost_history': cost_history,
         'fidelity_history': fidelity_history,
-        'ei_history': ei_history
+        'ei_history': ei_history,
+        # 학습 메트릭 추가
+        'training_history': training_history,
+        'pretrain_losses': training_history['pretrain_losses'],
+        'finetune_losses': training_history['finetune_losses'],
+        'online_dnn_losses': training_history['online_dnn_history'].get('losses', []),
+        'blr_L_errors': training_history['blr_L_history'].get('prediction_errors', []),
+        'blr_H_errors': training_history['blr_H_history'].get('prediction_errors', []),
     }
 
 

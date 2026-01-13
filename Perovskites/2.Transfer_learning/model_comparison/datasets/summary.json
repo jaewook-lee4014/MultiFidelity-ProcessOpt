@@ -1,0 +1,20 @@
+{
+  "configs": {
+    "cost_15": {
+      "n_lofi": 72,
+      "n_hifi": 9
+    },
+    "cost_30": {
+      "n_lofi": 136,
+      "n_hifi": 17
+    }
+  },
+  "n_sets_per_config": 5,
+  "total_datasets": 10,
+  "param_space_size": {
+    "organics": 16,
+    "cations": 3,
+    "anions": 4,
+    "total_combinations": 192
+  }
+}

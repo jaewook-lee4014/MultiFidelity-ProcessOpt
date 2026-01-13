@@ -4,7 +4,7 @@ BNN 하이퍼파라미터 베이지안 최적화 모듈
 BNN의 다양한 하이퍼파라미터들을 베이지안 최적화로 자동 튜닝합니다.
 - 모델 구조 (hidden_dims, noise_type)
 - 학습 설정 (epochs, learning_rate)
-- 베이지안 설정 (kl_weight, kl_warmup_epochs, prior_std)
+- 베이지안 설정 (kl_weight, kl_warmup_epochs, Scale Mixture Prior)
 """
 
 import numpy as np
@@ -56,12 +56,14 @@ class BNNHyperparameterSpace:
         # BNN 특화 하이퍼파라미터 (가장 중요한 것만)
         self.kl_weights = [0.1, 1.0, 10.0]  # 3개만 (0.01, 5.0 제거)
         
-        # 고정 하이퍼파라미터 (최적화하지 않음)
+        # 고정 하이퍼파라미터 (최적화하지 않음) - Scale Mixture Prior 사용
         self.fixed_params = {
             'pretrain_epochs': 200,  # 고정
             'pretrain_lr': 1e-3,     # 고정
             'kl_warmup_epochs': 10,  # 고정
-            'prior_std': 1.0,        # 고정
+            'prior_pi': 0.5,         # Scale Mixture Prior
+            'prior_sigma1': 1.0,
+            'prior_sigma2': 0.002,
             'noise_type': 'homoscedastic'  # 고정 (heteroscedastic은 복잡함)
         }
     
@@ -150,12 +152,14 @@ def evaluate_bnn_hyperparameters(params: Dict, X_train: np.ndarray, y_train: np.
                                 device: str = 'cpu', verbose: bool = False) -> float:
     """BNN 하이퍼파라미터 평가"""
     try:
-        # BNN 모델 생성
+        # BNN 모델 생성 (Scale Mixture Prior 사용)
         bnn = TransferLearningBNN(
             input_dim=input_dim,
             hidden_dims=params['hidden_dims'],
             device=device,
-            prior_std=params['prior_std'],
+            prior_pi=params.get('prior_pi', 0.5),
+            prior_sigma1=params.get('prior_sigma1', 1.0),
+            prior_sigma2=params.get('prior_sigma2', 0.002),
             noise_type=params['noise_type']
         )
         

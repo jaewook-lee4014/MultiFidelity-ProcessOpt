@@ -450,7 +450,7 @@ def plot_final_summary(results: Dict, save_path: Optional[str] = None):
     ax = axes[1, 1]
     if 'visualization_data' in results and len(results['visualization_data']) > 0:
         last_viz = results['visualization_data'][-1]
-        if len(last_viz['X_high']) > 0:
+        if 'X_high' in last_viz and len(last_viz['X_high']) > 0:
             plot_prediction_vs_actual(
                 last_viz['model'], last_viz['blr'],
                 last_viz['X_grid'], last_viz['X_high'], last_viz['y_high'],
@@ -469,13 +469,390 @@ def plot_final_summary(results: Dict, save_path: Optional[str] = None):
         plt.show()
 
 
-def plot_multiple_runs_boxplot(all_results: List[Dict], model_type: str = 'DNGO', 
+def plot_online_training_history(dnn_history: Dict, blr_L_history: Dict = None,
+                                  blr_H_history: Dict = None,
+                                  save_path: Optional[str] = None,
+                                  title_suffix: str = ""):
+    """
+    온라인 학습 과정 시각화
+
+    Args:
+        dnn_history: OnlineTransferLearningDNN의 online_training_history
+        blr_L_history: OnlineBayesianLinearRegression (Low)의 training_history
+        blr_H_history: OnlineBayesianLinearRegression (High)의 training_history
+        save_path: 저장 경로
+        title_suffix: 제목 추가 문자열
+    """
+    n_plots = 2 + (1 if blr_L_history else 0) + (1 if blr_H_history else 0)
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    axes = axes.flatten()
+
+    plot_idx = 0
+
+    # 1. DNN Online Training Loss
+    ax = axes[plot_idx]
+    if dnn_history and 'losses' in dnn_history:
+        losses = [l for l in dnn_history['losses'] if l is not None]
+        if losses:
+            ax.plot(losses, 'b-', linewidth=1.5, label='Online Loss')
+            ax.set_xlabel('Online Update')
+            ax.set_ylabel('MSE Loss')
+            ax.set_title('DNN Online Training Loss')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+
+            # 이동 평균 추가
+            if len(losses) > 5:
+                window = min(10, len(losses) // 3)
+                moving_avg = np.convolve(losses, np.ones(window)/window, mode='valid')
+                ax.plot(range(window-1, len(losses)), moving_avg, 'r-',
+                       linewidth=2, label=f'Moving Avg (w={window})')
+                ax.legend()
+    else:
+        ax.text(0.5, 0.5, 'No DNN training data', ha='center', va='center',
+               transform=ax.transAxes)
+        ax.set_title('DNN Online Training Loss')
+    plot_idx += 1
+
+    # 2. DNN Loss per Epoch (마지막 몇 업데이트)
+    ax = axes[plot_idx]
+    if dnn_history and 'losses_per_epoch' in dnn_history:
+        recent_epochs = dnn_history['losses_per_epoch'][-5:]  # 최근 5개 업데이트
+        colors = plt.cm.Blues(np.linspace(0.4, 1.0, len(recent_epochs)))
+
+        for i, epoch_losses in enumerate(recent_epochs):
+            if epoch_losses:
+                label = f'Update {len(dnn_history["losses_per_epoch"])-len(recent_epochs)+i+1}'
+                ax.plot(epoch_losses, color=colors[i], linewidth=1.5,
+                       marker='o', markersize=3, label=label)
+
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Loss')
+        ax.set_title('DNN Loss per Epoch (Recent Updates)')
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+    else:
+        ax.text(0.5, 0.5, 'No epoch data', ha='center', va='center',
+               transform=ax.transAxes)
+        ax.set_title('DNN Loss per Epoch')
+    plot_idx += 1
+
+    # 3. BLR Low-fidelity Metrics
+    ax = axes[plot_idx]
+    if blr_L_history and len(blr_L_history.get('prediction_errors', [])) > 0:
+        errors = np.array(blr_L_history['prediction_errors'])
+        ax.plot(np.abs(errors), 'g-', linewidth=1.5, alpha=0.7, label='|Prediction Error|')
+        ax.set_xlabel('Online Update')
+        ax.set_ylabel('Absolute Error')
+        ax.set_title('BLR Low-fidelity: Prediction Errors')
+
+        # 불확실성도 표시 (secondary y-axis)
+        if 'uncertainties' in blr_L_history and len(blr_L_history['uncertainties']) > 0:
+            ax2 = ax.twinx()
+            uncertainties = np.sqrt(blr_L_history['uncertainties'])  # std로 변환
+            ax2.plot(uncertainties, 'orange', linewidth=1.5, alpha=0.7, label='Std Dev')
+            ax2.set_ylabel('Uncertainty (Std)', color='orange')
+            ax2.tick_params(axis='y', labelcolor='orange')
+
+        ax.legend(loc='upper left')
+        ax.grid(True, alpha=0.3)
+    else:
+        ax.text(0.5, 0.5, 'No BLR Low-fidelity data', ha='center', va='center',
+               transform=ax.transAxes)
+        ax.set_title('BLR Low-fidelity: Prediction Errors')
+    plot_idx += 1
+
+    # 4. BLR High-fidelity Metrics
+    ax = axes[plot_idx]
+    if blr_H_history and len(blr_H_history.get('prediction_errors', [])) > 0:
+        errors = np.array(blr_H_history['prediction_errors'])
+        ax.plot(np.abs(errors), 'r-', linewidth=1.5, alpha=0.7, label='|Prediction Error|')
+        ax.set_xlabel('Online Update')
+        ax.set_ylabel('Absolute Error')
+        ax.set_title('BLR High-fidelity: Prediction Errors')
+
+        # 불확실성도 표시 (secondary y-axis)
+        if 'uncertainties' in blr_H_history and len(blr_H_history['uncertainties']) > 0:
+            ax2 = ax.twinx()
+            uncertainties = np.sqrt(blr_H_history['uncertainties'])  # std로 변환
+            ax2.plot(uncertainties, 'purple', linewidth=1.5, alpha=0.7, label='Std Dev')
+            ax2.set_ylabel('Uncertainty (Std)', color='purple')
+            ax2.tick_params(axis='y', labelcolor='purple')
+
+        ax.legend(loc='upper left')
+        ax.grid(True, alpha=0.3)
+    else:
+        ax.text(0.5, 0.5, 'No BLR High-fidelity data', ha='center', va='center',
+               transform=ax.transAxes)
+        ax.set_title('BLR High-fidelity: Prediction Errors')
+
+    plt.suptitle(f'Online Learning Training History {title_suffix}',
+                fontsize=14, fontweight='bold')
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+
+def plot_blr_diagnostics(blr_history: Dict, fidelity_name: str = "BLR",
+                         save_path: Optional[str] = None):
+    """
+    BLR 온라인 학습 상세 진단 플롯
+
+    Args:
+        blr_history: OnlineBayesianLinearRegression의 training_history
+        fidelity_name: BLR 이름 (예: "Low", "High")
+        save_path: 저장 경로
+    """
+    if not blr_history or len(blr_history.get('prediction_errors', [])) == 0:
+        print(f"No {fidelity_name} BLR training history available")
+        return
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+
+    # 1. Prediction Error 분포
+    ax = axes[0, 0]
+    errors = np.array(blr_history['prediction_errors'])
+    ax.hist(errors, bins=30, color='steelblue', alpha=0.7, edgecolor='black')
+    ax.axvline(x=0, color='red', linestyle='--', linewidth=2)
+    ax.axvline(x=np.mean(errors), color='green', linestyle='-', linewidth=2,
+              label=f'Mean: {np.mean(errors):.4f}')
+    ax.set_xlabel('Prediction Error')
+    ax.set_ylabel('Frequency')
+    ax.set_title('Prediction Error Distribution')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    # 2. Covariance Trace (모델 확신도)
+    ax = axes[0, 1]
+    if 'cov_trace' in blr_history and len(blr_history['cov_trace']) > 0:
+        cov_trace = blr_history['cov_trace']
+        ax.plot(cov_trace, 'b-', linewidth=1.5)
+        ax.set_xlabel('Online Update')
+        ax.set_ylabel('Trace(Covariance)')
+        ax.set_title('Model Uncertainty (Covariance Trace)')
+        ax.set_yscale('log')
+        ax.grid(True, alpha=0.3)
+
+    # 3. Log Likelihood 추이
+    ax = axes[1, 0]
+    if 'log_likelihoods' in blr_history and len(blr_history['log_likelihoods']) > 0:
+        ll = blr_history['log_likelihoods']
+        ax.plot(ll, 'g-', linewidth=1.5)
+        ax.set_xlabel('Online Update')
+        ax.set_ylabel('Log Likelihood')
+        ax.set_title('Log Likelihood Evolution')
+        ax.grid(True, alpha=0.3)
+
+    # 4. Error vs Uncertainty 산점도
+    ax = axes[1, 1]
+    if 'uncertainties' in blr_history and len(blr_history['uncertainties']) > 0:
+        uncertainties = np.sqrt(blr_history['uncertainties'])  # std
+        ax.scatter(uncertainties, np.abs(errors), alpha=0.6, c='purple')
+
+        # y=x 선 (calibration reference)
+        max_val = max(max(uncertainties), max(np.abs(errors)))
+        ax.plot([0, max_val], [0, max_val], 'r--', alpha=0.5, label='y=x (perfect calibration)')
+
+        ax.set_xlabel('Predicted Uncertainty (Std)')
+        ax.set_ylabel('Actual |Error|')
+        ax.set_title('Uncertainty Calibration')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+    plt.suptitle(f'{fidelity_name} BLR Online Learning Diagnostics',
+                fontsize=14, fontweight='bold')
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+
+def plot_combined_training_summary(results: Dict, save_path: Optional[str] = None):
+    """
+    전체 학습 과정 종합 요약 시각화
+
+    Args:
+        results: 최적화 결과 딕셔너리 (training_history 포함)
+        save_path: 저장 경로
+    """
+    fig = plt.figure(figsize=(16, 12))
+    gs = gridspec.GridSpec(3, 3, figure=fig)
+
+    # 1. Pretrain Loss (좌상단)
+    ax1 = fig.add_subplot(gs[0, 0])
+    if 'pretrain_losses' in results and results['pretrain_losses']:
+        ax1.plot(results['pretrain_losses'], 'b-', linewidth=1)
+        ax1.set_xlabel('Epoch')
+        ax1.set_ylabel('Loss')
+        ax1.set_title('Pretrain Loss (Low-fidelity)')
+        ax1.grid(True, alpha=0.3)
+    else:
+        ax1.text(0.5, 0.5, 'No pretrain loss data', ha='center', va='center',
+                transform=ax1.transAxes)
+        ax1.set_title('Pretrain Loss')
+
+    # 2. Finetune Loss (중앙상단)
+    ax2 = fig.add_subplot(gs[0, 1])
+    if 'finetune_losses' in results and results['finetune_losses']:
+        ax2.plot(results['finetune_losses'], 'r-', linewidth=1)
+        ax2.set_xlabel('Epoch')
+        ax2.set_ylabel('Loss')
+        ax2.set_title('Finetune Loss (High-fidelity)')
+        ax2.grid(True, alpha=0.3)
+    else:
+        ax2.text(0.5, 0.5, 'No finetune loss data', ha='center', va='center',
+                transform=ax2.transAxes)
+        ax2.set_title('Finetune Loss')
+
+    # 3. Online DNN Loss (우상단)
+    ax3 = fig.add_subplot(gs[0, 2])
+    if 'online_dnn_losses' in results and results['online_dnn_losses']:
+        losses = [l for l in results['online_dnn_losses'] if l is not None]
+        if losses:
+            ax3.plot(losses, 'g-', linewidth=1)
+            ax3.set_xlabel('Online Update')
+            ax3.set_ylabel('Loss')
+            ax3.set_title('Online DNN Loss')
+            ax3.grid(True, alpha=0.3)
+    else:
+        ax3.text(0.5, 0.5, 'No online DNN loss data', ha='center', va='center',
+                transform=ax3.transAxes)
+        ax3.set_title('Online DNN Loss')
+
+    # 4. BLR Prediction Errors (중앙 왼쪽)
+    ax4 = fig.add_subplot(gs[1, 0])
+    if 'blr_L_errors' in results and results['blr_L_errors']:
+        ax4.plot(np.abs(results['blr_L_errors']), 'b-', alpha=0.7, label='Low-fidelity')
+    if 'blr_H_errors' in results and results['blr_H_errors']:
+        ax4.plot(np.abs(results['blr_H_errors']), 'r-', alpha=0.7, label='High-fidelity')
+    ax4.set_xlabel('Online Update')
+    ax4.set_ylabel('|Prediction Error|')
+    ax4.set_title('BLR Prediction Errors')
+    ax4.legend()
+    ax4.grid(True, alpha=0.3)
+
+    # 5. Best So Far Curve (중앙)
+    ax5 = fig.add_subplot(gs[1, 1])
+    if 'best_values_history' in results:
+        ax5.plot(results['best_values_history'], 'b-', linewidth=2)
+        ax5.axhline(y=1.34, color='r', linestyle='--', alpha=0.5, label='Target')
+        ax5.set_xlabel('Iteration')
+        ax5.set_ylabel('Best Value')
+        ax5.set_title('Optimization Progress')
+        ax5.legend()
+        ax5.grid(True, alpha=0.3)
+
+    # 6. EI History (중앙 오른쪽)
+    ax6 = fig.add_subplot(gs[1, 2])
+    if 'ei_history' in results:
+        ax6.plot(results['ei_history'], 'g-', linewidth=1)
+        ax6.set_xlabel('Iteration')
+        ax6.set_ylabel('Max EI')
+        ax6.set_title('Expected Improvement')
+        ax6.set_yscale('log')
+        ax6.grid(True, alpha=0.3)
+
+    # 7. Fidelity & Buffer Size (하단 전체)
+    ax7 = fig.add_subplot(gs[2, :])
+    if 'fidelity_history' in results:
+        iterations = range(len(results['fidelity_history']))
+        colors = ['red' if f == 1.0 else 'blue' for f in results['fidelity_history']]
+        ax7.scatter(iterations, results['fidelity_history'], c=colors, alpha=0.6, s=30)
+        ax7.set_xlabel('Iteration')
+        ax7.set_ylabel('Fidelity')
+        ax7.set_title('Fidelity Scheduling')
+        ax7.set_ylim(-0.1, 1.2)
+        ax7.grid(True, alpha=0.3)
+
+    plt.suptitle('Complete Training Summary', fontsize=16, fontweight='bold')
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+
+
+def visualize_training_results(results: Dict, save_dir: Optional[str] = None,
+                                show_plots: bool = True):
+    """
+    최적화 결과에서 학습 과정을 종합적으로 시각화하는 편의 함수
+
+    Args:
+        results: single_optimization_run_dngo_ol의 결과 딕셔너리
+        save_dir: 저장 디렉토리 (None이면 저장하지 않음)
+        show_plots: 플롯을 화면에 표시할지 여부
+
+    사용 예시:
+        result = single_optimization_run_dngo_ol(...)
+        visualize_training_results(result, save_dir='./training_plots')
+    """
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+
+    # 1. 온라인 학습 히스토리 시각화
+    if 'training_history' in results:
+        th = results['training_history']
+
+        # 온라인 학습 과정 시각화
+        save_path = os.path.join(save_dir, 'online_training_history.png') if save_dir else None
+        plot_online_training_history(
+            dnn_history=th.get('online_dnn_history', {}),
+            blr_L_history=th.get('blr_L_history', {}),
+            blr_H_history=th.get('blr_H_history', {}),
+            save_path=save_path,
+            title_suffix=f"(Cost: {results.get('total_cost', 0):.1f})"
+        )
+        if not show_plots and save_path:
+            plt.close()
+
+        # BLR 진단 플롯 (Low-fidelity)
+        if th.get('blr_L_history') and len(th['blr_L_history'].get('prediction_errors', [])) > 0:
+            save_path = os.path.join(save_dir, 'blr_low_diagnostics.png') if save_dir else None
+            plot_blr_diagnostics(th['blr_L_history'], fidelity_name="Low-fidelity",
+                               save_path=save_path)
+            if not show_plots and save_path:
+                plt.close()
+
+        # BLR 진단 플롯 (High-fidelity)
+        if th.get('blr_H_history') and len(th['blr_H_history'].get('prediction_errors', [])) > 0:
+            save_path = os.path.join(save_dir, 'blr_high_diagnostics.png') if save_dir else None
+            plot_blr_diagnostics(th['blr_H_history'], fidelity_name="High-fidelity",
+                               save_path=save_path)
+            if not show_plots and save_path:
+                plt.close()
+
+    # 2. 종합 요약 플롯
+    save_path = os.path.join(save_dir, 'training_summary.png') if save_dir else None
+    plot_combined_training_summary(results, save_path=save_path)
+    if not show_plots and save_path:
+        plt.close()
+
+    # 3. 최종 요약 플롯
+    save_path = os.path.join(save_dir, 'optimization_summary.png') if save_dir else None
+    plot_final_summary(results, save_path=save_path)
+    if not show_plots and save_path:
+        plt.close()
+
+    if save_dir:
+        print(f"✅ Training visualizations saved to: {save_dir}")
+
+
+def plot_multiple_runs_boxplot(all_results: List[Dict], model_type: str = 'DNGO',
                                save_path: Optional[str] = None):
     """
     다중 실행 결과를 박스플롯으로 시각화 - cumulative cost 기준
-    
+
     Args:
-        all_results: 여러 실행의 결과 리스트  
+        all_results: 여러 실행의 결과 리스트
         model_type: 모델 타입 (x축 레이블용)
         save_path: 저장 경로
     """

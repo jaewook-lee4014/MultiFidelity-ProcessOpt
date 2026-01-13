@@ -5,10 +5,12 @@ from scipy.stats import norm
 from typing import List, Tuple, Dict, Optional
 import sys
 from pathlib import Path
+from collections import deque
 sys.path.append(str(Path(__file__).parent.parent))
 
 from DNGO.models import TransferLearningDNN
-from BNN.bnn_models import TransferLearningBNN
+from BNN.bnn_models import TransferLearningBNN, OnlineTransferLearningBNN
+from DNGO.optimization import OnlineBayesianLinearRegression
 
 
 def expected_improvement(mu: np.ndarray, sigma: np.ndarray, y_best: float, xi: float = 0.01) -> np.ndarray:
@@ -44,59 +46,68 @@ def penalized_expected_improvement(mu: np.ndarray, sigma: np.ndarray, y_best: fl
 
 
 def train_dual_bnn_models(X_low: np.ndarray, y_low: np.ndarray, X_high: np.ndarray, y_high: np.ndarray,
-                         input_dim: int = 3, hidden_dims: List[int] = [64, 64], device: str = 'cpu',
+                         input_dim: int = 3, hidden_dims: List[int] = [64, 64, 64], device: str = 'cpu',
                          pretrain_epochs: int = 200, finetune_epochs: int = 100,
                          pretrain_lr: float = 1e-3, finetune_lr: float = 1e-4,
-                         kl_weight: float = 1.0, kl_warmup_epochs: int = 10,
-                         prior_std: float = 1.0, noise_type: str = 'homoscedastic',
+                         kl_weight: float = 0.5, kl_warmup_epochs: int = 10,
+                         prior_pi: float = 0.5, prior_sigma1: float = 1.0, prior_sigma2: float = 0.002,
+                         noise_type: str = 'homoscedastic',
                          use_hyperparameter_bo: bool = False, pretrain_bo_trials: int = 0,
                          finetune_bo_trials: int = 0, data_size: str = 'small',
                          verbose: bool = False) -> Tuple[TransferLearningBNN, TransferLearningBNN]:
     """
     듀얼 BNN 모델 학습 (LOW/HIGH 서로게이트 분리)
-    
+
     Args:
         X_low: low-fidelity 입력 데이터
         y_low: low-fidelity 출력 데이터
         X_high: high-fidelity 입력 데이터
         y_high: high-fidelity 출력 데이터
         input_dim: 입력 차원
-        hidden_dims: BNN hidden layer 차원들
+        hidden_dims: BNN hidden layer 차원들 (기본값: [64, 64, 64] - 3층)
         device: 디바이스
         pretrain_epochs: pretrain epochs
         finetune_epochs: finetune epochs
         pretrain_lr: pretrain 학습률
         finetune_lr: finetune 학습률
-        kl_weight: KL divergence 가중치
+        kl_weight: KL divergence 가중치 (기본값: 0.5 - 최적화된 값)
         kl_warmup_epochs: KL warm-up epochs
-        prior_std: 사전분포 표준편차
+        prior_pi: Scale Mixture Prior 혼합 가중치 (기본값: 0.5)
+        prior_sigma1: Scale Mixture Prior sigma1 (기본값: 1.0)
+        prior_sigma2: Scale Mixture Prior sigma2 (기본값: 0.002)
         noise_type: 'homoscedastic' or 'heteroscedastic'
         use_hyperparameter_bo: 하이퍼파라미터 BO 사용 여부
         pretrain_bo_trials: pretrain BO 시행 횟수
         finetune_bo_trials: finetune BO 시행 횟수
         data_size: 데이터 크기
         verbose: 상세 출력
-        
+
     Returns:
         (surrogate_L, surrogate_H): 로우파이/하이파이 전용 모델들
     """
     # Surrogate_L: 로우파이 전용 모델
     surrogate_L = TransferLearningBNN(
-        input_dim=input_dim, 
-        hidden_dims=hidden_dims, 
+        input_dim=input_dim,
+        hidden_dims=hidden_dims,
         device=device,
-        prior_std=prior_std,
+        prior_pi=prior_pi,
+        prior_sigma1=prior_sigma1,
+        prior_sigma2=prior_sigma2,
         noise_type=noise_type,
+        kl_weight=kl_weight,
         use_hyperparameter_bo=use_hyperparameter_bo
     )
-    
+
     # Surrogate_H: 하이파이 전용 모델 (전이학습)
     surrogate_H = TransferLearningBNN(
-        input_dim=input_dim, 
-        hidden_dims=hidden_dims, 
+        input_dim=input_dim,
+        hidden_dims=hidden_dims,
         device=device,
-        prior_std=prior_std,
+        prior_pi=prior_pi,
+        prior_sigma1=prior_sigma1,
+        prior_sigma2=prior_sigma2,
         noise_type=noise_type,
+        kl_weight=kl_weight,
         use_hyperparameter_bo=use_hyperparameter_bo
     )
     
@@ -265,14 +276,16 @@ def single_optimization_run_bnn(param_space: Dict, label_maps: Dict, lookup: Dic
     if model_config is None:
         model_config = {
             'input_dim': 3,
-            'hidden_dims': [64, 64],
+            'hidden_dims': [64, 64, 64],  # 3층 구조 (개선된 기본값)
             'pretrain_epochs': 200,
             'finetune_epochs': 100,
             'pretrain_lr': 1e-3,
             'finetune_lr': 1e-4,
-            'kl_weight': 1.0,
+            'kl_weight': 0.5,  # 최적화된 기본값 (기존 1.0에서 변경)
             'kl_warmup_epochs': 10,
-            'prior_std': 1.0,
+            'prior_pi': 0.5,  # Scale Mixture Prior
+            'prior_sigma1': 1.0,
+            'prior_sigma2': 0.002,
             'noise_type': 'homoscedastic',
             'n_samples': 100,
             'device': 'cpu'
@@ -341,7 +354,7 @@ def single_optimization_run_bnn(param_space: Dict, label_maps: Dict, lookup: Dic
         
         # Dual BNN 모델 학습 (LOW/HIGH 분리)
         surrogate_L, surrogate_H = train_dual_bnn_models(
-            X_low, y_low, X_high, y_high, 
+            X_low, y_low, X_high, y_high,
             input_dim=model_config['input_dim'],
             hidden_dims=model_config['hidden_dims'],
             device=model_config['device'],
@@ -351,7 +364,9 @@ def single_optimization_run_bnn(param_space: Dict, label_maps: Dict, lookup: Dic
             finetune_lr=model_config['finetune_lr'],
             kl_weight=model_config['kl_weight'],
             kl_warmup_epochs=model_config['kl_warmup_epochs'],
-            prior_std=model_config['prior_std'],
+            prior_pi=model_config.get('prior_pi', 0.5),
+            prior_sigma1=model_config.get('prior_sigma1', 1.0),
+            prior_sigma2=model_config.get('prior_sigma2', 0.002),
             noise_type=model_config['noise_type'],
             use_hyperparameter_bo=use_hyperparameter_bo,
             pretrain_bo_trials=pretrain_bo_trials,
@@ -440,42 +455,48 @@ def single_optimization_run_bnn(param_space: Dict, label_maps: Dict, lookup: Dic
         
         # 측정
         measurement = measure_from_label(next_x_label, s, label_maps, lookup)
-        
+
+        # BO iteration 로그 (항상 출력)
+        fid_str = "H" if s == 1.0 else "L"
+        print(f"  [Iter {iter_:3d}] point={next_x_label}, fid={fid_str}, "
+              f"EI={ei[best_idx]:.4f}, pred={y_pred[best_idx]:.3f}±{y_std[best_idx]:.3f}, "
+              f"actual={measurement:.4f}", flush=True)
+
         if verbose:
             print(f"Recommended: {next_x_label} (fidelity: {s})")
             print(f"Measurement: {measurement:.4f}")
             print(f"Max EI: {ei[best_idx]:.6f}")
             print(f"Predicted: {y_pred[best_idx]:.4f} ± {y_std[best_idx]:.4f}")
-        
+
         # 데이터 업데이트
         X_low, y_low, X_high, y_high = append_measurement_to_data(
             X_low, y_low, X_high, y_high, next_x_label, s, label_maps, lookup
         )
-        
+
         # 비용 및 시간 업데이트
         iter_end = time.time()
         time_taken = iter_end - iter_start
         total_cost += s
-        
+
         # best_so_far 업데이트 (high-fidelity만)
         if s == 1.0:
             if measurement < best_so_far:
                 best_so_far = measurement
-        
+
         # 기록
         timing_data.append([0, iter_, time_taken])
         cost_data.append([0, iter_, total_cost])
         best_so_far_curve.append([0, iter_, s, best_so_far])
-        
+
         if verbose:
             print(f"Cumulative cost: {total_cost:.2f}, best_so_far: {best_so_far:.4f}")
-        
+
         # 조기 종료 조건
         if s == 1.0 and np.isclose(measurement, min_target, atol=1e-6):
             if verbose:
                 print('Found the minimum target value!')
             break
-    
+
     # 기존 DNGO 시각화와 호환성을 위한 데이터 변환
     best_values_history = [x[3] for x in best_so_far_curve]  # best-so-far 값들
     cost_history = [x[2] for x in cost_data]  # 비용 기록
@@ -544,8 +565,20 @@ def multiple_optimization_runs_bnn(param_space: Dict, label_maps: Dict, lookup: 
             print(f"Run {run+1}: Found target! Cost: {result['total_cost']:.2f}")
         else:
             print(f"Run {run+1}: Completed. Cost: {result['total_cost']:.2f}, Best: {result['best_so_far']:.4f}")
-    
-    # 결과 저장
+
+        # 매 run 완료 후 실시간 결과 저장
+        if save_results:
+            results_df = pd.DataFrame({
+                'run': range(1, len(all_results) + 1),
+                'total_cost': all_costs,
+                'best_so_far': [r['best_so_far'] for r in all_results],
+                'iterations': [r['iterations'] for r in all_results],
+                'model_type': [r['model_type'] for r in all_results]
+            })
+            results_df.to_csv(results_filename, index=False)
+            print(f"  💾 Results saved ({len(all_results)}/{num_runs} runs)", flush=True)
+
+    # 최종 결과 저장 (중복이지만 안전을 위해 유지)
     if save_results:
         results_df = pd.DataFrame({
             'run': range(1, num_runs + 1),
@@ -561,11 +594,564 @@ def multiple_optimization_runs_bnn(param_space: Dict, label_maps: Dict, lookup: 
     success_rate = sum(1 for r in all_results if r['best_so_far'] <= min_target) / num_runs
     avg_cost = np.mean(all_costs)
     std_cost = np.std(all_costs)
-    
+
     print(f"\n=== Summary Statistics (BNN) ===")
     print(f"Success rate: {success_rate:.2%}")
     print(f"Average cost: {avg_cost:.2f} ± {std_cost:.2f}")
     print(f"Min cost: {np.min(all_costs):.2f}")
     print(f"Max cost: {np.max(all_costs):.2f}")
-    
+
+    return all_results
+
+
+# ============================================================================
+# BNN-OL (Online Learning) Functions
+# ============================================================================
+
+def train_bnn_ol_models(X_low: np.ndarray, y_low: np.ndarray, X_high: np.ndarray, y_high: np.ndarray,
+                        input_dim: int = 3, hidden_dims: List[int] = [64, 64, 64], device: str = 'cpu',
+                        pretrain_epochs: int = 200, finetune_epochs: int = 100,
+                        pretrain_lr: float = 1e-3, finetune_lr: float = 1e-4,
+                        online_lr: float = 1e-5, forgetting_factor: float = 0.99,
+                        memory_size: int = 100, replay_buffer_size: int = 100,
+                        online_batch_size: int = 16, online_epochs: int = 5,
+                        kl_weight: float = 0.5, kl_warmup_epochs: int = 10,
+                        prior_pi: float = 0.5, prior_sigma1: float = 1.0, prior_sigma2: float = 0.002,
+                        noise_type: str = 'homoscedastic',
+                        verbose: bool = False,
+                        use_hyperparameter_bo: bool = False, pretrain_bo_trials: int = 0,
+                        finetune_bo_trials: int = 0, data_size: str = 'small',
+                        use_loocv: bool = False, use_uncertainty_loss: bool = False,
+                        uncertainty_weight: float = 0.3,
+                        use_freeze: bool = False, unfreeze_ratio: float = 1.0,
+                        transfer_mode: str = 'consistent_bnn') -> Tuple:
+    """
+    BNN-OL 모델 학습 (온라인 학습 지원)
+
+    Args:
+        hidden_dims: 히든 레이어 차원 (기본값: [64, 64, 64] - 3층 구조)
+        kl_weight: KL divergence 가중치 (기본값: 0.5 - 최적화된 값)
+        prior_pi: Scale Mixture Prior 혼합 가중치 (기본값: 0.5)
+        prior_sigma1: Scale Mixture Prior sigma1 (기본값: 1.0)
+        prior_sigma2: Scale Mixture Prior sigma2 (기본값: 0.002)
+        transfer_mode: 전이학습 모드 ('consistent_bnn' 권장)
+
+    Returns:
+        (model, blr_L, blr_H): BNN 모델과 LOW/HIGH BLR 모델들
+    """
+    # 온라인 BNN 모델 생성 (개선된 Scale Mixture Prior 적용)
+    model = OnlineTransferLearningBNN(
+        input_dim=input_dim,
+        hidden_dims=hidden_dims,
+        device=device,
+        prior_pi=prior_pi,
+        prior_sigma1=prior_sigma1,
+        prior_sigma2=prior_sigma2,
+        noise_type=noise_type,
+        use_hyperparameter_bo=use_hyperparameter_bo,
+        kl_weight=kl_weight,
+        kl_warmup_epochs=kl_warmup_epochs,
+        replay_buffer_size=replay_buffer_size,
+        online_batch_size=online_batch_size,
+        online_epochs=online_epochs,
+        transfer_mode=transfer_mode
+    )
+
+    # 초기 학습 (기존 데이터가 있는 경우)
+    if len(X_low) > 0:
+        if use_hyperparameter_bo and pretrain_bo_trials > 0:
+            model.pretrain(X_low, y_low, epochs=pretrain_epochs, lr=pretrain_lr, verbose=verbose,
+                          bo_trials=pretrain_bo_trials, data_size=data_size,
+                          use_loocv=use_loocv, use_uncertainty_loss=use_uncertainty_loss,
+                          uncertainty_weight=uncertainty_weight)
+        else:
+            model.pretrain(X_low, y_low, epochs=pretrain_epochs, lr=pretrain_lr, verbose=verbose)
+        if verbose:
+            print("✅ BNN-OL: Low-fidelity 초기 학습 완료")
+
+    if len(X_high) > 0:
+        if use_hyperparameter_bo and finetune_bo_trials > 0:
+            model.finetune(X_high, y_high, epochs=finetune_epochs, lr=finetune_lr, verbose=verbose,
+                          bo_trials=finetune_bo_trials, data_size=data_size,
+                          use_loocv=use_loocv, use_uncertainty_loss=use_uncertainty_loss,
+                          uncertainty_weight=uncertainty_weight,
+                          use_freeze=use_freeze, unfreeze_ratio=unfreeze_ratio,
+                          kl_weight=kl_weight, kl_warmup_epochs=kl_warmup_epochs)
+        else:
+            model.finetune(X_high, y_high, epochs=finetune_epochs, lr=finetune_lr, verbose=verbose,
+                          use_freeze=use_freeze, unfreeze_ratio=unfreeze_ratio,
+                          kl_weight=kl_weight, kl_warmup_epochs=kl_warmup_epochs)
+        if verbose:
+            print("✅ BNN-OL: High-fidelity 미세조정 완료")
+
+    # 온라인 BLR 모델 생성 (LOW/HIGH 분리) - DNGO-OL과 동일
+    blr_L = OnlineBayesianLinearRegression(
+        alpha=1.0, beta=25.0,
+        forgetting_factor=forgetting_factor,
+        memory_size=memory_size
+    )
+
+    blr_H = OnlineBayesianLinearRegression(
+        alpha=1.0, beta=25.0,
+        forgetting_factor=forgetting_factor,
+        memory_size=memory_size
+    )
+
+    # BLR 초기 학습
+    if len(X_low) > 0:
+        features_low = model.extract_features(X_low)
+        blr_L.fit(features_low, y_low)
+
+    if len(X_high) > 0:
+        features_high = model.extract_features(X_high)
+        blr_H.fit(features_high, y_high)
+
+    return model, blr_L, blr_H
+
+
+def update_bnn_ol_online(model: OnlineTransferLearningBNN,
+                         blr_L: OnlineBayesianLinearRegression,
+                         blr_H: OnlineBayesianLinearRegression,
+                         new_x: np.ndarray, new_y: float, fidelity: float,
+                         online_lr: float = 1e-5, verbose: bool = False):
+    """새로운 데이터 포인트로 BNN-OL 모델 온라인 업데이트"""
+
+    # 적절한 BLR 모델 선택
+    if fidelity == 1.0:
+        fidelity_str = 'high'
+        blr = blr_H
+    else:
+        fidelity_str = 'low'
+        blr = blr_L
+
+    # BNN 온라인 업데이트
+    model.update_online(
+        new_x.reshape(1, -1),
+        np.array([new_y]),
+        fidelity=fidelity_str,
+        lr=online_lr
+    )
+
+    # 새로운 특징 추출
+    new_features = model.extract_features(new_x.reshape(1, -1))
+
+    # BLR 온라인 업데이트
+    blr.update_online(new_features.flatten(), new_y)
+
+    if verbose:
+        print(f"✅ BNN-OL 온라인 업데이트 완료 ({fidelity_str} fidelity)")
+
+
+def recommend_next_bnn_ol(model: OnlineTransferLearningBNN,
+                          blr_L: OnlineBayesianLinearRegression,
+                          blr_H: OnlineBayesianLinearRegression,
+                          param_ranges: List[range], X_low: np.ndarray, X_high: np.ndarray,
+                          y_low: np.ndarray, y_high: np.ndarray, s: float,
+                          verbose: bool = False) -> Tuple:
+    """BNN-OL을 사용한 다음 실험점 추천"""
+
+    # 전체 조합 생성
+    all_combinations = list(itertools.product(*param_ranges))
+    X_grid = np.array(all_combinations, dtype=np.float32)
+
+    # Fidelity에 따라 적절한 BLR 모델 선택
+    if s == 1.0:
+        blr = blr_H
+        if verbose:
+            print("🎯 고신뢰도 EI 계산: BLR_H 사용")
+    else:
+        blr = blr_L
+        if verbose:
+            print("🔍 저신뢰도 EI 계산: BLR_L 사용")
+
+    # 현재까지의 최적값
+    if len(y_high) > 0:
+        y_best = np.min(y_high)
+    elif len(y_low) > 0:
+        y_best = np.min(y_low)
+    else:
+        y_best = np.inf
+
+    # 전체 조합에 대한 예측
+    features_grid = model.extract_features(X_grid)
+    y_pred, y_std = [], []
+
+    for phi in features_grid:
+        mu, var = blr.predict(phi)
+        y_pred.append(mu)
+        y_std.append(np.sqrt(var))
+
+    y_pred = np.array(y_pred)
+    y_std = np.array(y_std)
+
+    # Expected Improvement 계산
+    ei = expected_improvement(y_pred, y_std, y_best)
+
+    # 이미 측정된 점들 추적
+    measured_points = set()
+    for x in X_low:
+        measured_points.add((tuple(x.astype(int)), 'low'))
+    for x in X_high:
+        measured_points.add((tuple(x.astype(int)), 'high'))
+
+    current_fidelity = 'high' if s == 1.0 else 'low'
+
+    # 유효한 후보 필터링
+    valid_indices = []
+    for i, combo in enumerate(X_grid):
+        combo_tuple = tuple(combo.astype(int))
+        if (combo_tuple, current_fidelity) not in measured_points:
+            valid_indices.append(i)
+
+    if not valid_indices:
+        best_idx = np.argmax(ei)
+        if verbose:
+            print(f"⚠️  Warning: All points measured at {current_fidelity} fidelity")
+    else:
+        valid_ei = ei[valid_indices]
+        best_valid_idx = np.argmax(valid_ei)
+        best_idx = valid_indices[best_valid_idx]
+
+    next_x_label = list(X_grid[best_idx].astype(int))
+
+    return next_x_label, y_pred, y_std, ei, best_idx, X_grid
+
+
+def single_optimization_run_bnn_ol(param_space: Dict, label_maps: Dict, lookup: Dict,
+                                   cost_budget: float = 50.0, num_init_design: int = 10,
+                                   high_fidelity_ratio: float = 0.2, min_target: float = 1.5249,
+                                   random_state: int = 42, verbose: bool = True,
+                                   model_config: Dict = None, save_images: bool = False,
+                                   images_dir: str = 'images',
+                                   use_hyperparameter_bo: bool = False,
+                                   pretrain_bo_trials: int = 0, finetune_bo_trials: int = 0,
+                                   data_size: str = 'small',
+                                   use_loocv: bool = False, use_uncertainty_loss: bool = False,
+                                   uncertainty_weight: float = 0.3,
+                                   use_freeze: bool = False, unfreeze_ratio: float = 1.0) -> Dict:
+    """
+    BNN-OL을 사용한 단일 최적화 실행 (온라인 학습 지원)
+    """
+    from common.data_utils import (
+        sample_param_space, assign_fidelities, prepare_initial_data,
+        measure_from_label, append_measurement_to_data
+    )
+
+    if model_config is None:
+        model_config = {
+            'input_dim': 3,
+            'hidden_dims': [64, 64, 64],  # 3층 구조 (개선된 기본값)
+            'pretrain_epochs': 200,
+            'finetune_epochs': 100,
+            'pretrain_lr': 1e-3,
+            'finetune_lr': 1e-4,
+            'online_lr': 1e-5,
+            'forgetting_factor': 0.99,
+            'memory_size': 100,
+            'replay_buffer_size': 100,
+            'online_batch_size': 16,
+            'online_epochs': 5,
+            'kl_weight': 0.5,  # 최적화된 기본값 (기존 1.0에서 변경)
+            'kl_warmup_epochs': 10,
+            'prior_pi': 0.5,  # Scale Mixture Prior
+            'prior_sigma1': 1.0,
+            'prior_sigma2': 0.002,
+            'noise_type': 'homoscedastic',
+            'n_samples': 100,
+            'device': 'cpu',
+            'transfer_mode': 'consistent_bnn'  # 일관된 BNN 모드 권장
+        }
+
+    # 파라미터 범위
+    param_ranges = [
+        range(1, len(param_space['organic']) + 1),
+        range(1, len(param_space['cation']) + 1),
+        range(1, len(param_space['anion']) + 1),
+    ]
+
+    # 초기 설계
+    init_samples = sample_param_space(param_space, num_init_design, random_state=random_state)
+    init_fids = assign_fidelities(num_init_design, high_fidelity_ratio, random_state=random_state)
+
+    # 초기 데이터 준비
+    X_low, y_low, X_high, y_high = prepare_initial_data(init_samples, init_fids, label_maps, lookup)
+
+    # 초기 비용 계산
+    total_cost = sum(init_fids)
+
+    # 추적 변수들
+    best_so_far = np.inf
+    best_so_far_curve = []
+    timing_data = []
+    cost_data = []
+    iter_ = 0
+    visualization_data = []
+
+    # 이미지 저장 폴더 설정
+    run_dir = None
+    if save_images:
+        import os
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
+        run_dir = os.path.join(images_dir, f"BNN-OL_cost{int(cost_budget)}_{timestamp}")
+        os.makedirs(run_dir, exist_ok=True)
+        if verbose:
+            print(f"💾 Images will be saved to: {run_dir}")
+
+    # 초기 best_so_far 설정
+    if len(y_high) > 0:
+        best_so_far = np.min(y_high)
+
+    # 초기 모델 학습 (개선된 Scale Mixture Prior 적용)
+    model, blr_L, blr_H = train_bnn_ol_models(
+        X_low, y_low, X_high, y_high,
+        input_dim=model_config['input_dim'],
+        hidden_dims=model_config['hidden_dims'],
+        device=model_config['device'],
+        pretrain_epochs=model_config['pretrain_epochs'],
+        finetune_epochs=model_config['finetune_epochs'],
+        pretrain_lr=model_config['pretrain_lr'],
+        finetune_lr=model_config['finetune_lr'],
+        online_lr=model_config.get('online_lr', 1e-5),
+        forgetting_factor=model_config.get('forgetting_factor', 0.99),
+        memory_size=model_config.get('memory_size', 100),
+        replay_buffer_size=model_config.get('replay_buffer_size', 100),
+        online_batch_size=model_config.get('online_batch_size', 16),
+        online_epochs=model_config.get('online_epochs', 5),
+        kl_weight=model_config.get('kl_weight', 0.5),
+        kl_warmup_epochs=model_config.get('kl_warmup_epochs', 10),
+        prior_pi=model_config.get('prior_pi', 0.5),
+        prior_sigma1=model_config.get('prior_sigma1', 1.0),
+        prior_sigma2=model_config.get('prior_sigma2', 0.002),
+        noise_type=model_config.get('noise_type', 'homoscedastic'),
+        verbose=verbose,
+        use_hyperparameter_bo=use_hyperparameter_bo,
+        pretrain_bo_trials=pretrain_bo_trials,
+        finetune_bo_trials=finetune_bo_trials,
+        data_size=data_size,
+        use_loocv=use_loocv,
+        use_uncertainty_loss=use_uncertainty_loss,
+        uncertainty_weight=uncertainty_weight,
+        use_freeze=use_freeze,
+        unfreeze_ratio=unfreeze_ratio,
+        transfer_mode=model_config.get('transfer_mode', 'consistent_bnn')
+    )
+
+    if verbose:
+        print(f"🚀 Using BNN-OL (Online Learning)")
+        print(f"Initial cost: {total_cost:.2f}, Initial best_so_far: {best_so_far}")
+        print(f"Config: forgetting_factor={model_config.get('forgetting_factor', 0.99)}, memory_size={model_config.get('memory_size', 100)}")
+
+    # 메인 최적화 루프
+    while total_cost < cost_budget:
+        iter_ += 1
+        iter_start = time.time()
+
+        if verbose:
+            print(f"\n==== Iteration {iter_} ====")
+
+        # Fidelity 스케줄링: 8번 중 1번만 high-fidelity
+        s = 1.0 if (iter_ % 8 == 0) else 0.1
+
+        # 주기적으로 BLR 재학습 (안정성 향상)
+        if iter_ % 20 == 0:
+            if verbose:
+                print("🔄 Periodic BLR refit")
+            blr_L.periodic_refit()
+            blr_H.periodic_refit()
+
+        # 다음 실험점 추천
+        next_x_label, y_pred, y_std, ei, best_idx, X_grid = recommend_next_bnn_ol(
+            model, blr_L, blr_H, param_ranges, X_low, X_high, y_low, y_high, s,
+            verbose=False
+        )
+
+        # 시각화용 데이터 저장
+        visualization_data.append({
+            'iteration': iter_,
+            'y_pred': y_pred.copy(),
+            'y_std': y_std.copy(),
+            'ei': ei.copy(),
+            'best_idx': best_idx,
+            'X_grid': X_grid.copy(),
+            'fidelity': s,
+            'recommended_point': next_x_label.copy()
+        })
+
+        # 측정
+        measurement = measure_from_label(next_x_label, s, label_maps, lookup)
+
+        # BO iteration 로그 (항상 출력)
+        fid_str = "H" if s == 1.0 else "L"
+        print(f"  [Iter {iter_:3d}] point={next_x_label}, fid={fid_str}, "
+              f"EI={ei[best_idx]:.4f}, pred={y_pred[best_idx]:.3f}±{y_std[best_idx]:.3f}, "
+              f"actual={measurement:.4f}", flush=True)
+
+        if verbose:
+            print(f"Recommended: {next_x_label} (fidelity: {s})")
+            print(f"Measurement: {measurement:.4f}")
+            print(f"Max EI: {ei[best_idx]:.6f}")
+            print(f"Predicted: {y_pred[best_idx]:.4f} ± {y_std[best_idx]:.4f}")
+
+        # 온라인 모델 업데이트
+        new_x = np.array(next_x_label, dtype=np.float32)
+        update_bnn_ol_online(
+            model, blr_L, blr_H, new_x, measurement, s,
+            online_lr=model_config.get('online_lr', 1e-5),
+            verbose=False
+        )
+
+        # 데이터 업데이트
+        X_low, y_low, X_high, y_high = append_measurement_to_data(
+            X_low, y_low, X_high, y_high, next_x_label, s, label_maps, lookup
+        )
+
+        # 비용 및 시간 업데이트
+        iter_end = time.time()
+        time_taken = iter_end - iter_start
+        total_cost += s
+
+        # best_so_far 업데이트 (high-fidelity만)
+        if s == 1.0:
+            if measurement < best_so_far:
+                best_so_far = measurement
+
+        # 기록
+        timing_data.append([0, iter_, time_taken])
+        cost_data.append([0, iter_, total_cost])
+        best_so_far_curve.append([0, iter_, s, best_so_far])
+
+        if verbose:
+            print(f"Cumulative cost: {total_cost:.2f}, best_so_far: {best_so_far:.4f}")
+
+        # 조기 종료 조건
+        if s == 1.0 and np.isclose(measurement, min_target, atol=1e-6):
+            if verbose:
+                print('Found the minimum target value!')
+            break
+
+    # 결과 호환성을 위한 데이터 변환
+    best_values_history = [x[3] for x in best_so_far_curve]
+    cost_history = [x[2] for x in cost_data]
+    fidelity_history = [data['fidelity'] for data in visualization_data]
+    ei_history = [data['ei'][data['best_idx']] for data in visualization_data]
+
+    # 학습 메트릭 수집
+    training_history = {
+        'pretrain_losses': model.pretrain_losses if hasattr(model, 'pretrain_losses') else [],
+        'finetune_losses': model.finetune_losses if hasattr(model, 'finetune_losses') else [],
+        'online_bnn_history': model.online_training_history if hasattr(model, 'online_training_history') else {},
+        'blr_L_history': blr_L.training_history if hasattr(blr_L, 'training_history') else {},
+        'blr_H_history': blr_H.training_history if hasattr(blr_H, 'training_history') else {},
+    }
+
+    return {
+        'total_cost': total_cost,
+        'best_so_far': best_so_far,
+        'iterations': iter_,
+        'best_so_far_curve': best_so_far_curve,
+        'timing_data': timing_data,
+        'cost_data': cost_data,
+        'final_X_low': X_low,
+        'final_y_low': y_low,
+        'final_X_high': X_high,
+        'final_y_high': y_high,
+        'model_type': 'BNN-OL',
+        'model_config': model_config,
+        'visualization_data': visualization_data,
+        'best_values_history': best_values_history,
+        'cost_history': cost_history,
+        'fidelity_history': fidelity_history,
+        'ei_history': ei_history,
+        # 학습 메트릭 추가
+        'training_history': training_history,
+        'pretrain_losses': training_history['pretrain_losses'],
+        'finetune_losses': training_history['finetune_losses'],
+        'online_bnn_losses': training_history['online_bnn_history'].get('losses', []),
+        'blr_L_errors': training_history['blr_L_history'].get('prediction_errors', []),
+        'blr_H_errors': training_history['blr_H_history'].get('prediction_errors', []),
+    }
+
+
+def multiple_optimization_runs_bnn_ol(param_space: Dict, label_maps: Dict, lookup: Dict,
+                                      num_runs: int = 100, cost_budget: float = 50.0,
+                                      num_init_design: int = 10, high_fidelity_ratio: float = 0.2,
+                                      min_target: float = 1.5249, model_config: Dict = None,
+                                      save_results: bool = True,
+                                      results_filename: str = 'bnn_ol_results.csv',
+                                      use_hyperparameter_bo: bool = False,
+                                      pretrain_bo_trials: int = 0, finetune_bo_trials: int = 0,
+                                      data_size: str = 'small',
+                                      use_loocv: bool = False, use_uncertainty_loss: bool = False,
+                                      uncertainty_weight: float = 0.3,
+                                      use_freeze: bool = False, unfreeze_ratio: float = 1.0) -> List[Dict]:
+    """
+    BNN-OL을 사용한 다중 최적화 실행
+    """
+    import pandas as pd
+
+    all_results = []
+    all_costs = []
+
+    print(f"🚀 Starting {num_runs} optimization runs with BNN-OL (Online Learning)...")
+    if use_hyperparameter_bo:
+        print(f"   Hyperparameter BO: pretrain_trials={pretrain_bo_trials}, finetune_trials={finetune_bo_trials}")
+        print(f"   LOOCV: {use_loocv}, Uncertainty Loss: {use_uncertainty_loss} (weight={uncertainty_weight})")
+
+    for run in range(num_runs):
+        print(f"\n===== Run {run+1}/{num_runs} =====")
+
+        result = single_optimization_run_bnn_ol(
+            param_space=param_space,
+            label_maps=label_maps,
+            lookup=lookup,
+            cost_budget=cost_budget,
+            num_init_design=num_init_design,
+            high_fidelity_ratio=high_fidelity_ratio,
+            min_target=min_target,
+            random_state=run,
+            verbose=False,
+            model_config=model_config,
+            use_hyperparameter_bo=use_hyperparameter_bo,
+            pretrain_bo_trials=pretrain_bo_trials,
+            finetune_bo_trials=finetune_bo_trials,
+            data_size=data_size,
+            use_loocv=use_loocv,
+            use_uncertainty_loss=use_uncertainty_loss,
+            uncertainty_weight=uncertainty_weight,
+            use_freeze=use_freeze,
+            unfreeze_ratio=unfreeze_ratio
+        )
+
+        all_results.append(result)
+        all_costs.append(result['total_cost'])
+
+        if result['best_so_far'] <= min_target:
+            print(f"Run {run+1}: Found target! Cost: {result['total_cost']:.2f}")
+        else:
+            print(f"Run {run+1}: Completed. Cost: {result['total_cost']:.2f}, Best: {result['best_so_far']:.4f}")
+
+    # 결과 저장
+    if save_results:
+        results_df = pd.DataFrame({
+            'run': range(1, num_runs + 1),
+            'total_cost': all_costs,
+            'best_so_far': [r['best_so_far'] for r in all_results],
+            'iterations': [r['iterations'] for r in all_results],
+            'model_type': [r['model_type'] for r in all_results]
+        })
+        results_df.to_csv(results_filename, index=False)
+        print(f"\nResults saved to {results_filename}")
+
+    # 요약 통계
+    success_rate = sum(1 for r in all_results if r['best_so_far'] <= min_target) / num_runs
+    avg_cost = np.mean(all_costs)
+    std_cost = np.std(all_costs)
+
+    print(f"\n=== Summary Statistics (BNN-OL) ===")
+    print(f"Success rate: {success_rate:.2%}")
+    print(f"Average cost: {avg_cost:.2f} ± {std_cost:.2f}")
+    print(f"Min cost: {np.min(all_costs):.2f}")
+    print(f"Max cost: {np.max(all_costs):.2f}")
+
     return all_results

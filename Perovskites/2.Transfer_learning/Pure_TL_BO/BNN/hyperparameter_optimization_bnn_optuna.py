@@ -57,6 +57,7 @@ def evaluate_bnn_with_loocv(X: np.ndarray, y: np.ndarray,
                             pretrain_epochs: int, pretrain_lr: float,
                             finetune_epochs: int = 0, finetune_lr: float = 1e-4,
                             kl_weight: float = 1.0,
+                            batch_size: int = None,
                             use_uncertainty_loss: bool = False,
                             uncertainty_weight: float = 0.3,
                             stage: str = 'pretrain') -> float:
@@ -73,6 +74,7 @@ def evaluate_bnn_with_loocv(X: np.ndarray, y: np.ndarray,
         finetune_epochs: finetune epoch 수 (finetune stage에서만)
         finetune_lr: finetune 학습률
         kl_weight: KL divergence 가중치
+        batch_size: 미니배치 크기 (None이면 전체 배치)
         use_uncertainty_loss: 불확실성 손실 사용 여부
         uncertainty_weight: 불확실성 손실 가중치
         stage: 'pretrain' 또는 'finetune'
@@ -84,10 +86,7 @@ def evaluate_bnn_with_loocv(X: np.ndarray, y: np.ndarray,
     predictions = np.zeros(n)
     uncertainties = np.zeros(n)
 
-    # LOOCV epoch 수 감소 (n번 반복하므로)
-    reduced_pretrain_epochs = max(pretrain_epochs // 3, 30)
-    reduced_finetune_epochs = max(finetune_epochs // 3, 20) if finetune_epochs > 0 else 0
-
+    # 원래 epoch 수 그대로 사용
     for i in range(n):
         # Leave-One-Out
         X_train = np.delete(X, i, axis=0)
@@ -102,11 +101,11 @@ def evaluate_bnn_with_loocv(X: np.ndarray, y: np.ndarray,
         )
 
         # Pretrain
-        bnn.pretrain(X_train, y_train, epochs=reduced_pretrain_epochs, lr=pretrain_lr, verbose=False)
+        bnn.pretrain(X_train, y_train, epochs=pretrain_epochs, lr=pretrain_lr, verbose=False)
 
         # Finetune (stage가 finetune일 때만)
-        if stage == 'finetune' and reduced_finetune_epochs > 0:
-            bnn.finetune(X_train, y_train, epochs=reduced_finetune_epochs, lr=finetune_lr,
+        if stage == 'finetune' and finetune_epochs > 0:
+            bnn.finetune(X_train, y_train, epochs=finetune_epochs, lr=finetune_lr,
                         kl_weight=kl_weight, verbose=False)
 
         # 예측 (불확실성 포함)
@@ -134,6 +133,7 @@ def evaluate_bnn_with_train_val_split(X_train: np.ndarray, y_train: np.ndarray,
                                        pretrain_epochs: int, pretrain_lr: float,
                                        finetune_epochs: int = 0, finetune_lr: float = 1e-4,
                                        kl_weight: float = 1.0,
+                                       batch_size: int = None,
                                        use_uncertainty_loss: bool = False,
                                        uncertainty_weight: float = 0.3,
                                        stage: str = 'pretrain') -> float:
@@ -150,6 +150,7 @@ def evaluate_bnn_with_train_val_split(X_train: np.ndarray, y_train: np.ndarray,
         finetune_epochs: finetune epoch 수
         finetune_lr: finetune 학습률
         kl_weight: KL divergence 가중치
+        batch_size: 미니배치 크기 (None이면 전체 배치)
         use_uncertainty_loss: 불확실성 손실 사용 여부
         uncertainty_weight: 불확실성 손실 가중치
         stage: 'pretrain' 또는 'finetune'
@@ -225,22 +226,14 @@ def create_bnn_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
     def objective(trial):
         try:
             if stage == 'pretrain':
-                # Pretrain 단계 하이퍼파라미터
-                if data_size == 'small':
-                    hidden_layers = trial.suggest_int('hidden_layers', 1, 2)
-                    hidden_dim = trial.suggest_categorical('hidden_dim', [32, 64])
-                    learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)
-                    epochs = trial.suggest_int('epochs', 100, 250)
-                elif data_size == 'medium':
-                    hidden_layers = trial.suggest_int('hidden_layers', 1, 3)
-                    hidden_dim = trial.suggest_categorical('hidden_dim', [32, 64, 128])
-                    learning_rate = trial.suggest_float('learning_rate', 1e-4, 5e-3, log=True)
-                    epochs = trial.suggest_int('epochs', 150, 300)
-                else:  # large
-                    hidden_layers = trial.suggest_int('hidden_layers', 2, 4)
-                    hidden_dim = trial.suggest_categorical('hidden_dim', [64, 128, 256])
-                    learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-3, log=True)
-                    epochs = trial.suggest_int('epochs', 200, 400)
+                # Pretrain 단계 하이퍼파라미터 (확장된 탐색 공간)
+                hidden_layers = trial.suggest_int('hidden_layers', 1, 4)
+                hidden_dim = trial.suggest_categorical('hidden_dim', [32, 64, 128, 256])
+                learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True)
+                # epochs 범위 확장: 20 ~ 500
+                epochs = trial.suggest_int('epochs', 20, 500)
+                # batch_size 추가 (넓은 범위)
+                batch_size = trial.suggest_categorical('batch_size', [8, 16, 32, 64, 128, 256, 512])
 
                 hidden_dims = [hidden_dim] * hidden_layers
 
@@ -249,6 +242,7 @@ def create_bnn_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                     val_loss = evaluate_bnn_with_loocv(
                         X_all, y_all, hidden_dims, device,
                         pretrain_epochs=epochs, pretrain_lr=learning_rate,
+                        batch_size=batch_size,
                         use_uncertainty_loss=use_uncertainty_loss,
                         uncertainty_weight=uncertainty_weight,
                         stage='pretrain'
@@ -258,6 +252,7 @@ def create_bnn_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                         X_train, y_train, X_val, y_val,
                         hidden_dims, device,
                         pretrain_epochs=epochs, pretrain_lr=learning_rate,
+                        batch_size=batch_size,
                         use_uncertainty_loss=use_uncertainty_loss,
                         uncertainty_weight=uncertainty_weight,
                         stage='pretrain'
@@ -274,19 +269,14 @@ def create_bnn_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                     hidden_layers = 2
                     hidden_dim = 64
 
-                # Learning rate, epochs, kl_weight만 탐색
-                if data_size == 'small':
-                    learning_rate = trial.suggest_float('learning_rate', 1e-5, 1e-3, log=True)
-                    epochs = trial.suggest_int('epochs', 50, 150)
-                    kl_weight = trial.suggest_float('kl_weight', 0.1, 10.0, log=True)
-                elif data_size == 'medium':
-                    learning_rate = trial.suggest_float('learning_rate', 1e-5, 5e-4, log=True)
-                    epochs = trial.suggest_int('epochs', 75, 200)
-                    kl_weight = trial.suggest_float('kl_weight', 0.1, 10.0, log=True)
-                else:  # large
-                    learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-4, log=True)
-                    epochs = trial.suggest_int('epochs', 100, 250)
-                    kl_weight = trial.suggest_float('kl_weight', 0.1, 10.0, log=True)
+                # Learning rate, epochs, kl_weight만 탐색 (확장된 탐색 공간)
+                learning_rate = trial.suggest_float('learning_rate', 1e-6, 1e-3, log=True)
+                # epochs 범위 확장: 20 ~ 500
+                epochs = trial.suggest_int('epochs', 20, 500)
+                # batch_size 추가 (넓은 범위)
+                batch_size = trial.suggest_categorical('batch_size', [8, 16, 32, 64, 128, 256, 512])
+                # kl_weight: 최적화된 범위 0.2~2.0 (4-model comparison 결과 0.4-0.5가 최적)
+                kl_weight = trial.suggest_float('kl_weight', 0.2, 2.0, log=True)
 
                 # Incremental learning 파라미터 (finetune에서만, 향후 사용)
                 if optimize_incremental:
@@ -308,6 +298,7 @@ def create_bnn_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                         pretrain_epochs=100, pretrain_lr=1e-3,  # pretrain은 고정
                         finetune_epochs=epochs, finetune_lr=learning_rate,
                         kl_weight=kl_weight,
+                        batch_size=batch_size,
                         use_uncertainty_loss=use_uncertainty_loss,
                         uncertainty_weight=uncertainty_weight,
                         stage='finetune'
@@ -319,6 +310,7 @@ def create_bnn_optuna_objective(X_train: np.ndarray, y_train: np.ndarray,
                         pretrain_epochs=100, pretrain_lr=1e-3,  # pretrain은 고정
                         finetune_epochs=epochs, finetune_lr=learning_rate,
                         kl_weight=kl_weight,
+                        batch_size=batch_size,
                         use_uncertainty_loss=use_uncertainty_loss,
                         uncertainty_weight=uncertainty_weight,
                         stage='finetune'
@@ -410,6 +402,12 @@ def optimize_bnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
                 })
                 pbar.update(1)
 
+                # Trial 상세 로그 출력
+                if trial.value is not None:
+                    params_str = ", ".join([f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}"
+                                           for k, v in trial.params.items()])
+                    print(f"        [Trial {trial.number+1}/{n_trials}] {params_str} → loss={trial.value:.4f}", flush=True)
+
             study.optimize(objective, n_trials=n_trials, callbacks=[callback])
     else:
         optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -427,9 +425,11 @@ def optimize_bnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
         del best_params['hidden_layers']
         del best_params['hidden_dim']
     
-    # BNN 고정 파라미터 추가 (finetune에서 필요)
+    # BNN 고정 파라미터 추가 (Scale Mixture Prior 사용)
     if stage == 'finetune':
-        best_params['prior_std'] = 1.0  # 고정값
+        best_params['prior_pi'] = 0.5  # Scale Mixture Prior
+        best_params['prior_sigma1'] = 1.0
+        best_params['prior_sigma2'] = 0.002
         best_params['noise_type'] = 'homoscedastic'  # 고정값
         best_params['kl_warmup_epochs'] = 10  # 고정값
         best_params['finetune_epochs'] = best_params.get('epochs', 100)
@@ -437,7 +437,7 @@ def optimize_bnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
     elif stage == 'pretrain':
         best_params['pretrain_epochs'] = best_params.get('epochs', 200)
         best_params['pretrain_lr'] = best_params.get('learning_rate', 1e-3)
-    
+
     # 모든 시행 기록
     trial_history = []
     for trial in study.trials:
@@ -449,10 +449,12 @@ def optimize_bnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
                 record['hidden_dims'] = [record['hidden_dim']] * record['hidden_layers']
                 del record['hidden_layers']
                 del record['hidden_dim']
-            
-            # 고정 파라미터 추가 (기록에도 포함)
+
+            # 고정 파라미터 추가 (Scale Mixture Prior 사용)
             if stage == 'finetune':
-                record['prior_std'] = 1.0
+                record['prior_pi'] = 0.5
+                record['prior_sigma1'] = 1.0
+                record['prior_sigma2'] = 0.002
                 record['noise_type'] = 'homoscedastic'
                 record['kl_warmup_epochs'] = 10
                 record['finetune_epochs'] = record.get('epochs', 100)
@@ -460,21 +462,22 @@ def optimize_bnn_hyperparameters_optuna(X_train: np.ndarray, y_train: np.ndarray
             elif stage == 'pretrain':
                 record['pretrain_epochs'] = record.get('epochs', 200)
                 record['pretrain_lr'] = record.get('learning_rate', 1e-3)
-                
+
             trial_history.append(record)
     
     if verbose:
+        batch_str = f", batch={best_params.get('batch_size', 'full')}"
         if stage == 'pretrain':
             hidden_dims_str = f"dims={best_params.get('hidden_dims', 'N/A')}"
             lr_str = f"lr={best_params.get('learning_rate', 0):.1e}"
             epochs_str = f"epochs={best_params.get('epochs', 0)}"
-            param_str = f"{hidden_dims_str}, {lr_str}, {epochs_str}"
+            param_str = f"{hidden_dims_str}, {lr_str}, {epochs_str}{batch_str}"
             print(f"      ✅ Best {stage_prefix} params: {param_str}")
         else:
             lr_str = f"lr={best_params.get('learning_rate', 0):.1e}"
             epochs_str = f"epochs={best_params.get('epochs', 0)}"
             kl_str = f"kl={best_params.get('kl_weight', 'N/A'):.1f}" if 'kl_weight' in best_params else ""
-            param_str = f"{lr_str}, {epochs_str}"
+            param_str = f"{lr_str}, {epochs_str}{batch_str}"
             if kl_str:
                 param_str += f", {kl_str}"
             print(f"      ✅ Best {stage_prefix} params: {param_str} (structure fixed)")

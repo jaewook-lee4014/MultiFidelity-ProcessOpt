@@ -25,6 +25,8 @@ from common.data_utils import (
 from DNGO.optimization_base import single_optimization_run, multiple_optimization_runs
 # Legacy imports for backward compatibility with DNGO-OL
 from DNGO.optimization import single_optimization_run_dngo_ol, multiple_optimization_runs_dngo_ol
+# BNN-OL imports
+from BNN.optimization_bnn import single_optimization_run_bnn_ol, multiple_optimization_runs_bnn_ol
 from common.device_utils import setup_device_for_bnn, clear_mps_cache
 from common.visualization import (
     plot_iteration_results, plot_prediction_scatter, 
@@ -58,8 +60,8 @@ def parse_arguments():
     )
     
     # 기본 실행 옵션
-    parser.add_argument('--model-type', choices=['dngo', 'bnn', 'dngo-ol'], default='dngo',
-                       help='모델 타입: DNGO, BNN, 또는 DNGO-OL (Online Learning)')
+    parser.add_argument('--model-type', choices=['dngo', 'bnn', 'dngo-ol', 'bnn-ol'], default='dngo',
+                       help='모델 타입: DNGO, BNN, DNGO-OL, 또는 BNN-OL (Online Learning)')
     parser.add_argument('--num-runs', type=int, default=1,
                        help='실행 횟수 (1: single run, >1: multiple runs)')
     parser.add_argument('--verbose', action='store_true',
@@ -134,14 +136,19 @@ def parse_arguments():
                        help='이미지 저장 디렉토리')
     
     # BNN 전용 옵션
-    parser.add_argument('--bnn-hidden-dims', nargs='+', type=int, default=[64, 64],
-                       help='BNN hidden layer 차원들 (예: --bnn-hidden-dims 64 64)')
-    parser.add_argument('--kl-weight', type=float, default=1.0,
+    parser.add_argument('--bnn-hidden-dims', nargs='+', type=int, default=[64, 64, 64],
+                       help='BNN hidden layer 차원들 (예: --bnn-hidden-dims 64 64 64)')
+    parser.add_argument('--kl-weight', type=float, default=0.5,
                        help='BNN KL divergence 가중치')
     parser.add_argument('--kl-warmup-epochs', type=int, default=10,
                        help='BNN KL warm-up epochs')
-    parser.add_argument('--prior-std', type=float, default=1.0,
-                       help='BNN 사전분포 표준편차')
+    # Scale Mixture Prior (Blundell et al. 2015)
+    parser.add_argument('--prior-pi', type=float, default=0.5,
+                       help='Scale Mixture Prior mixture weight')
+    parser.add_argument('--prior-sigma1', type=float, default=1.0,
+                       help='Scale Mixture Prior sigma1 (wide Gaussian)')
+    parser.add_argument('--prior-sigma2', type=float, default=0.002,
+                       help='Scale Mixture Prior sigma2 (narrow Gaussian)')
     parser.add_argument('--noise-type', choices=['homoscedastic', 'heteroscedastic'], default='homoscedastic',
                        help='BNN 노이즈 모델링 타입')
     parser.add_argument('--n-samples', type=int, default=100,
@@ -223,6 +230,29 @@ def setup_model_config(args):
             'online_epochs': args.online_epochs,
             'device': device
         }
+    elif args.model_type == 'bnn-ol':
+        return {
+            'input_dim': 3,  # organic, cation, anion
+            'hidden_dims': args.bnn_hidden_dims,
+            'pretrain_epochs': args.pretrain_epochs,
+            'finetune_epochs': args.finetune_epochs,
+            'pretrain_lr': 1e-3,
+            'finetune_lr': 1e-4,
+            'online_lr': args.online_lr,
+            'forgetting_factor': args.forgetting_factor,
+            'memory_size': args.memory_size,
+            'replay_buffer_size': args.replay_buffer_size,
+            'online_batch_size': args.online_batch_size,
+            'online_epochs': args.online_epochs,
+            'kl_weight': args.kl_weight,
+            'kl_warmup_epochs': args.kl_warmup_epochs,
+            'prior_pi': args.prior_pi,
+            'prior_sigma1': args.prior_sigma1,
+            'prior_sigma2': args.prior_sigma2,
+            'noise_type': args.noise_type,
+            'n_samples': args.n_samples,
+            'device': device
+        }
     else:  # BNN
         return {
             'input_dim': 3,  # organic, cation, anion
@@ -233,7 +263,9 @@ def setup_model_config(args):
             'finetune_lr': 1e-4,
             'kl_weight': args.kl_weight,
             'kl_warmup_epochs': args.kl_warmup_epochs,
-            'prior_std': args.prior_std,
+            'prior_pi': args.prior_pi,
+            'prior_sigma1': args.prior_sigma1,
+            'prior_sigma2': args.prior_sigma2,
             'noise_type': args.noise_type,
             'n_samples': args.n_samples,
             'device': device
@@ -277,7 +309,7 @@ def print_configuration(args, param_space, model_config, incremental_params=None
         print(f"  Hidden dimensions: {model_config['hidden_dims']}")
         print(f"  KL weight: {model_config['kl_weight']}")
         print(f"  KL warmup epochs: {model_config['kl_warmup_epochs']}")
-        print(f"  Prior std: {model_config['prior_std']}")
+        print(f"  Scale Mixture Prior: π={model_config['prior_pi']}, σ1={model_config['prior_sigma1']}, σ2={model_config['prior_sigma2']}")
         print(f"  Noise type: {model_config['noise_type']}")
         print(f"  Prediction samples: {model_config['n_samples']}")
     print(f"  Pretrain epochs: {model_config['pretrain_epochs']}")
@@ -388,6 +420,30 @@ def main():
                 )
             elif args.model_type == 'dngo-ol':
                 result = single_optimization_run_dngo_ol(
+                    param_space=param_space,
+                    label_maps=label_maps,
+                    lookup=lookup,
+                    cost_budget=args.cost_budget,
+                    num_init_design=args.num_init_design,
+                    high_fidelity_ratio=args.high_fidelity_ratio,
+                    min_target=args.min_target,
+                    random_state=42,
+                    verbose=args.verbose,
+                    model_config=model_config,
+                    save_images=args.save_images,
+                    images_dir=args.images_dir,
+                    use_hyperparameter_bo=args.use_hyperparameter_bo,
+                    pretrain_bo_trials=args.pretrain_bo_trials,
+                    finetune_bo_trials=args.finetune_bo_trials,
+                    data_size=args.data_size,
+                    use_loocv=args.use_loocv,
+                    use_uncertainty_loss=args.use_uncertainty_loss,
+                    uncertainty_weight=args.uncertainty_weight,
+                    use_freeze=args.use_freeze,
+                    unfreeze_ratio=args.unfreeze_ratio
+                )
+            elif args.model_type == 'bnn-ol':
+                result = single_optimization_run_bnn_ol(
                     param_space=param_space,
                     label_maps=label_maps,
                     lookup=lookup,
@@ -546,6 +602,29 @@ def main():
                     model_config=model_config,
                     save_results=args.save_results,
                     results_filename=args.results_filename if args.results_filename else 'dngo_ol_results.csv',
+                    use_hyperparameter_bo=args.use_hyperparameter_bo,
+                    pretrain_bo_trials=args.pretrain_bo_trials,
+                    finetune_bo_trials=args.finetune_bo_trials,
+                    data_size=args.data_size,
+                    use_loocv=args.use_loocv,
+                    use_uncertainty_loss=args.use_uncertainty_loss,
+                    uncertainty_weight=args.uncertainty_weight,
+                    use_freeze=args.use_freeze,
+                    unfreeze_ratio=args.unfreeze_ratio
+                )
+            elif args.model_type == 'bnn-ol':
+                results = multiple_optimization_runs_bnn_ol(
+                    param_space=param_space,
+                    label_maps=label_maps,
+                    lookup=lookup,
+                    num_runs=args.num_runs,
+                    cost_budget=args.cost_budget,
+                    num_init_design=args.num_init_design,
+                    high_fidelity_ratio=args.high_fidelity_ratio,
+                    min_target=args.min_target,
+                    model_config=model_config,
+                    save_results=args.save_results,
+                    results_filename=args.results_filename if args.results_filename else 'bnn_ol_results.csv',
                     use_hyperparameter_bo=args.use_hyperparameter_bo,
                     pretrain_bo_trials=args.pretrain_bo_trials,
                     finetune_bo_trials=args.finetune_bo_trials,

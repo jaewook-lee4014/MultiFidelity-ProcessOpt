@@ -1,5 +1,10 @@
 # Image directories
-2.Transfer_learning/Pure_TL_BO/images/
+**/images/
+**/training_viz/
+**/animations/
+**/plots/
+**/visualizations/
+**/viz_*/
 
 # Common image file extensions
 *.png
@@ -12,6 +17,7 @@
 *.tiff
 *.tif
 *.webp
+*.pdf
 
 # Python
 __pycache__/
@@ -57,27 +63,35 @@ env/
 Thumbs.db
 desktop.ini
 
-# Logs
+# Logs and SLURM outputs
 *.log
 logs/
+logs_*/
+slurm_*.out
+slurm_*.err
 
 # Data files that might be large
 *.pkl.gz
+*.pkl
 *.h5
 *.hdf5
+*.tgz
+*.tar.gz
+*.tar.xz
+*.zip
 
 # Results directories
 results/
 **/results/
+**/results_*/
 
 # Experiment output files
 tl_bo_results*.csv
 
 # Node.js
 node_modules/
-*.tar.xz
-*.tar.gz
 
-# Animation and visualization outputs
-animations/
-plots/
+# Temporary files
+*.tmp
+*.temp
+.cache/

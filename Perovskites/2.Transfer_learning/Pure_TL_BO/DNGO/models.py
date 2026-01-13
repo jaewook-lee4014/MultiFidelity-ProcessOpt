@@ -18,11 +18,26 @@ class TransferLearningDNN:
         out_layer: 출력층 (항상 학습)
     """
 
-    def __init__(self, input_dim, hidden_dim=64, device='cpu', use_hyperparameter_bo=False):
+    def __init__(self, input_dim, hidden_dim=64, device='cpu', use_hyperparameter_bo=False,
+                 activation='relu'):
+        """
+        Transfer Learning을 위한 Deep Neural Network
+
+        Args:
+            input_dim: 입력 차원
+            hidden_dim: 은닉층 차원
+            device: 디바이스 ('cpu' or 'cuda')
+            use_hyperparameter_bo: 하이퍼파라미터 BO 사용 여부
+            activation: 활성화 함수 ('relu', 'tanh', 'relu_tanh')
+                - 'relu': 모든 레이어에 ReLU (기본값)
+                - 'tanh': 모든 레이어에 tanh (DNGO 논문 권장)
+                - 'relu_tanh': 앞쪽 레이어 ReLU, 마지막 레이어 tanh (혼합형)
+        """
         self.input_dim = input_dim
         self.device = device
         self.hidden_dim = hidden_dim
         self.use_hyperparameter_bo = use_hyperparameter_bo
+        self.activation = activation
         self.pretrain_losses = []
         self.finetune_losses = []
 
@@ -46,6 +61,19 @@ class TransferLearningDNN:
         if not use_hyperparameter_bo:
             self._build_default_model(hidden_dim)
     
+    def _get_activation(self, layer_idx: int, total_layers: int):
+        """레이어별 활성화 함수 반환"""
+        if self.activation == 'tanh':
+            return nn.Tanh()
+        elif self.activation == 'relu_tanh':
+            # 마지막 레이어만 tanh, 나머지는 ReLU
+            if layer_idx == total_layers - 1:
+                return nn.Tanh()
+            else:
+                return nn.ReLU()
+        else:  # 'relu' (기본값)
+            return nn.ReLU()
+
     def _build_default_model(self, hidden_dim):
         """기본 모델 구조 생성 (레이어별 분리 저장)"""
         self.num_layers = 2
@@ -53,8 +81,8 @@ class TransferLearningDNN:
 
         # 레이어별로 분리하여 저장 (freeze 제어용)
         self.layer_list = nn.ModuleList([
-            nn.Sequential(nn.Linear(self.input_dim, hidden_dim), nn.ReLU()),
-            nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU()),
+            nn.Sequential(nn.Linear(self.input_dim, hidden_dim), self._get_activation(0, 2)),
+            nn.Sequential(nn.Linear(hidden_dim, hidden_dim), self._get_activation(1, 2)),
         ]).to(self.device)
 
         # feature_net: layer_list를 순차적으로 적용하는 wrapper
@@ -76,19 +104,22 @@ class TransferLearningDNN:
         """동적 모델 구조 생성 (BO 결과 기반, 레이어별 분리 저장)"""
         self.num_layers = params['hidden_layers']
         self.hidden_dim = params['hidden_dim']
+        total_layers = params['hidden_layers']
 
         # 레이어별로 분리하여 저장 (freeze 제어용)
         layer_modules = []
 
         # 첫 번째 레이어
         layer_modules.append(
-            nn.Sequential(nn.Linear(self.input_dim, params['hidden_dim']), nn.ReLU())
+            nn.Sequential(nn.Linear(self.input_dim, params['hidden_dim']),
+                         self._get_activation(0, total_layers))
         )
 
         # 중간 레이어들
-        for _ in range(params['hidden_layers'] - 1):
+        for i in range(1, params['hidden_layers']):
             layer_modules.append(
-                nn.Sequential(nn.Linear(params['hidden_dim'], params['hidden_dim']), nn.ReLU())
+                nn.Sequential(nn.Linear(params['hidden_dim'], params['hidden_dim']),
+                             self._get_activation(i, total_layers))
             )
 
         self.layer_list = nn.ModuleList(layer_modules).to(self.device)
@@ -151,6 +182,116 @@ class TransferLearningDNN:
                 params.append(param)
         return params
 
+    def _progressive_unfreeze_step(self, current_phase: int, total_phases: int, verbose: bool = False):
+        """
+        Progressive Unfreezing: 현재 phase에 맞게 레이어 해동
+
+        Args:
+            current_phase: 현재 phase (0부터 시작)
+            total_phases: 총 phase 수 (보통 레이어 수 + 1)
+            verbose: 상세 출력
+
+        Phase 진행:
+            - Phase 0: out_layer만 학습
+            - Phase 1: out_layer + 마지막 레이어
+            - Phase 2: out_layer + 마지막 2개 레이어
+            - ...
+            - Phase n: 전체 레이어 학습
+        """
+        n_layers = len(self.layer_list)
+
+        # Phase에 따라 해동할 레이어 수 계산
+        # Phase 0: 0개 (out_layer만), Phase 1: 1개, ..., Phase n: n개
+        n_unfreeze = min(current_phase, n_layers)
+
+        # 모든 feature_net 레이어 동결
+        for layer in self.layer_list:
+            for param in layer.parameters():
+                param.requires_grad = False
+
+        # 뒤쪽부터 n_unfreeze개 레이어 해동
+        for i in range(n_layers - n_unfreeze, n_layers):
+            for param in self.layer_list[i].parameters():
+                param.requires_grad = True
+
+        # out_layer는 항상 학습
+        for param in self.out_layer.parameters():
+            param.requires_grad = True
+
+        if verbose:
+            unfrozen_layers = [i for i in range(n_layers) if any(p.requires_grad for p in self.layer_list[i].parameters())]
+            print(f"      Phase {current_phase}: Unfrozen layers = {unfrozen_layers if unfrozen_layers else 'None (out_layer only)'}")
+
+    def _finetune_progressive(self, X_tensor, y_tensor, epochs: int, lr: float,
+                              verbose: bool = False,
+                              lr_boost: float = 2.0, lr_decay: float = 0.7):
+        """
+        Progressive Unfreezing을 적용한 finetune
+
+        전략:
+            - 총 epochs를 (n_layers + 1) phase로 나눔
+            - 각 phase마다 레이어를 하나씩 해동하며 학습
+
+        Args:
+            lr_boost: 초기 lr에 적용할 boost factor (default: 2.0)
+            lr_decay: phase마다 적용할 lr decay factor (default: 0.7)
+        """
+        n_layers = len(self.layer_list)
+        n_phases = n_layers + 1  # out_layer만 → 전체 레이어
+        epochs_per_phase = max(epochs // n_phases, 1)
+
+        # Progressive Unfreezing용 lr boost 적용
+        base_lr = lr * lr_boost
+
+        if verbose:
+            print(f"    Progressive Unfreezing: {n_phases} phases, {epochs_per_phase} epochs/phase")
+            print(f"    LR: {lr:.2e} -> {base_lr:.2e} (boost={lr_boost}x), decay={lr_decay}")
+
+        loss_fn = nn.MSELoss()
+        self.model.train()
+
+        for phase in range(n_phases):
+            # 현재 phase에 맞게 레이어 해동
+            self._progressive_unfreeze_step(phase, n_phases, verbose=verbose)
+
+            # 현재 학습 가능한 파라미터로 optimizer 생성
+            trainable_params = self._get_trainable_parameters()
+
+            # Phase가 진행될수록 학습률 감소 (더 완만하게: 0.7배)
+            phase_lr = base_lr * (lr_decay ** phase)
+            optimizer = optim.Adam(trainable_params, lr=phase_lr)
+
+            # 해당 phase의 epochs만큼 학습
+            for epoch in range(epochs_per_phase):
+                optimizer.zero_grad()
+                features = self.feature_net(X_tensor)
+                pred = self.out_layer(features)
+                loss = loss_fn(pred, y_tensor)
+                loss.backward()
+                optimizer.step()
+                self.finetune_losses.append(loss.item())
+
+        # 남은 epochs 처리 (전체 레이어 학습)
+        remaining_epochs = epochs - (n_phases * epochs_per_phase)
+        if remaining_epochs > 0:
+            trainable_params = self._get_trainable_parameters()
+            final_lr = base_lr * (lr_decay ** n_phases)
+            optimizer = optim.Adam(trainable_params, lr=final_lr)
+
+            for epoch in range(remaining_epochs):
+                optimizer.zero_grad()
+                features = self.feature_net(X_tensor)
+                pred = self.out_layer(features)
+                loss = loss_fn(pred, y_tensor)
+                loss.backward()
+                optimizer.step()
+                self.finetune_losses.append(loss.item())
+
+        # 학습 후 모든 파라미터 requires_grad 복원
+        for layer in self.layer_list:
+            for param in layer.parameters():
+                param.requires_grad = True
+
     def pretrain(self, X_low, y_low, epochs=50, lr=1e-3, verbose=False,
                  bo_trials=None, data_size='small',
                  use_loocv=False, use_uncertainty_loss=False, uncertainty_weight=0.3):
@@ -165,7 +306,7 @@ class TransferLearningDNN:
             verbose: 상세 출력
             bo_trials: BO 시행 횟수 (None이면 BO 사용 안함)
             data_size: 데이터 크기 ('small', 'medium', 'large')
-            use_loocv: LOOCV 사용 여부
+            use_loocv: LOOCV 사용 여부 (Pretrain에서는 무시됨, Finetune에서만 적용)
             use_uncertainty_loss: 불확실성 손실 사용 여부
             uncertainty_weight: 불확실성 손실 가중치
         """
@@ -182,6 +323,7 @@ class TransferLearningDNN:
             X_train, y_train, X_val, y_val = self._split_validation_data(X_low, y_low)
 
             # BO 실행 (Optuna 사용) - Pretrain 단계: 모든 파라미터 탐색
+            # NOTE: Pretrain에서는 LOOCV 사용 안함 (use_loocv=False 강제)
             from .hyperparameter_optimization_optuna import optimize_dnn_hyperparameters_optuna
             best_params, best_performance, history = optimize_dnn_hyperparameters_optuna(
                 X_train, y_train, X_val, y_val,
@@ -191,7 +333,7 @@ class TransferLearningDNN:
                 device=self.device,
                 stage='pretrain',
                 verbose=verbose,
-                use_loocv=use_loocv,
+                use_loocv=False,  # Pretrain에서는 LOOCV 사용 안함
                 use_uncertainty_loss=use_uncertainty_loss,
                 uncertainty_weight=uncertainty_weight
             )
@@ -228,7 +370,8 @@ class TransferLearningDNN:
     def finetune(self, X_high, y_high, epochs=50, lr=1e-4, verbose=False,
                  bo_trials=None, data_size='small',
                  use_loocv=False, use_uncertainty_loss=False, uncertainty_weight=0.3,
-                 use_freeze=False, unfreeze_ratio=1.0):
+                 use_freeze=False, unfreeze_ratio=1.0,
+                 use_progressive_unfreezing=False):
         """
         High-fidelity 데이터로 finetune
 
@@ -248,6 +391,9 @@ class TransferLearningDNN:
                 - 0.0: 모든 feature_net 동결, out_layer만 학습
                 - 0.5: 뒤쪽 50% 레이어 해동
                 - 1.0: 전체 해동 (Full fine-tuning, 기존과 동일)
+            use_progressive_unfreezing: Progressive Unfreezing 사용 여부
+                - True: 점진적으로 레이어를 해동하며 학습 (ULMFiT 스타일)
+                - use_freeze와 함께 사용 불가 (둘 중 하나만 선택)
         """
         self.finetune_losses = []
         X_high = np.asarray(X_high, dtype=np.float32)
@@ -301,7 +447,20 @@ class TransferLearningDNN:
                 if verbose:
                     print(f"    - Optimal unfreeze_ratio: {unfreeze_ratio:.2f}")
 
-        # Freeze 적용 (use_freeze=True일 때만)
+        # 전체 데이터로 최종 학습
+        X_tensor = torch.tensor(X_high, dtype=torch.float32).to(self.device)
+        y_tensor = torch.tensor(y_high, dtype=torch.float32).view(-1, 1).to(self.device)
+
+        # Progressive Unfreezing 모드
+        if use_progressive_unfreezing:
+            if use_freeze:
+                raise ValueError("use_freeze와 use_progressive_unfreezing은 동시에 사용할 수 없습니다.")
+            if verbose:
+                print(f"    - Using Progressive Unfreezing")
+            self._finetune_progressive(X_tensor, y_tensor, epochs, lr, verbose=verbose)
+            return
+
+        # Static Freeze 적용 (use_freeze=True일 때만)
         if use_freeze:
             self._apply_unfreeze_ratio(unfreeze_ratio)
             trainable_params = self._get_trainable_parameters()
@@ -313,9 +472,6 @@ class TransferLearningDNN:
             # 기존 방식: 모든 파라미터 학습
             trainable_params = list(self.feature_net.parameters()) + list(self.out_layer.parameters())
 
-        # 전체 데이터로 최종 학습
-        X_tensor = torch.tensor(X_high, dtype=torch.float32).to(self.device)
-        y_tensor = torch.tensor(y_high, dtype=torch.float32).view(-1, 1).to(self.device)
         optimizer = optim.Adam(trainable_params, lr=lr)
         loss_fn = nn.MSELoss()
 

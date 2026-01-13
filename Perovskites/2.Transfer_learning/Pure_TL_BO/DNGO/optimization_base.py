@@ -414,7 +414,7 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
     # 하이퍼파라미터 최적화 관련 변수
     last_optimized_params = None  # 마지막으로 최적화된 파라미터 저장
     last_optimization_iter = 0  # 마지막 최적화 시점
-    optimization_interval = 10  # 10개 데이터마다 최적화
+    optimization_interval = 50  # 50개 데이터마다 최적화
     
     # 점진적 학습 관련 변수
     previous_X_low, previous_y_low = X_low.copy(), y_low.copy()
@@ -751,8 +751,13 @@ def single_optimization_run(param_space: Dict, label_maps: Dict, lookup: Dict,
         
         # 측정
         measurement = measure_from_label(next_x_label, s, label_maps, lookup)
-        
-        
+
+        # BO iteration 로그 (항상 출력)
+        fid_str = "H" if s == 1.0 else "L"
+        print(f"  [Iter {iter_:3d}] point={next_x_label}, fid={fid_str}, "
+              f"EI={ei[best_idx]:.4f}, pred={y_pred[best_idx]:.3f}±{y_std[best_idx]:.3f}, "
+              f"actual={measurement:.4f}", flush=True)
+
         # 이전 데이터 상태 업데이트 (다음 점진적 학습을 위해)
         previous_X_low, previous_y_low = X_low.copy(), y_low.copy()
         previous_X_high, previous_y_high = X_high.copy(), y_high.copy()
@@ -910,8 +915,20 @@ def multiple_optimization_runs(param_space: Dict, label_maps: Dict, lookup: Dict
             print(f"Run {run+1}: Found target! Cost: {result['total_cost']:.2f}")
         else:
             print(f"Run {run+1}: Completed. Cost: {result['total_cost']:.2f}, Best: {result['best_so_far']:.4f}")
-    
-    # 결과 저장
+
+        # 매 run 완료 후 실시간 결과 저장
+        if save_results:
+            results_df = pd.DataFrame({
+                'run': range(1, len(all_results) + 1),
+                'total_cost': all_costs,
+                'best_so_far': [r['best_so_far'] for r in all_results],
+                'iterations': [r['iterations'] for r in all_results],
+                'use_hyperparameter_bo': [r['use_hyperparameter_bo'] for r in all_results]
+            })
+            results_df.to_csv(results_filename, index=False)
+            print(f"  💾 Results saved ({len(all_results)}/{num_runs} runs)", flush=True)
+
+    # 최종 결과 저장 (중복이지만 안전을 위해 유지)
     if save_results:
         results_df = pd.DataFrame({
             'run': range(1, num_runs + 1),
