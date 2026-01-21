@@ -959,8 +959,16 @@ def run_combination(args):
     """Worker function for parallel execution"""
     bench_name, bench_config, model_name, model_class, budget, seeds, output_dir, worker_id = args
 
-    # Set CUDA device (distribute across available GPUs if multiple)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # Explicitly initialize CUDA in worker process
+    if torch.cuda.is_available():
+        torch.cuda.init()
+        device = torch.device('cuda:0')
+        # Warm up GPU
+        _ = torch.zeros(1).to(device)
+    else:
+        device = torch.device('cpu')
+
+    print(f"[Worker {worker_id}] {bench_name} + {model_name}: Using {device}", flush=True)
 
     # Create benchmark
     if bench_config['type'] == 'synthetic':
@@ -1051,12 +1059,12 @@ def main():
     print(f"Seeds: {args.n_seeds}")
     print(f"Output: {output_dir}")
 
-    # Check GPU
+    # Check GPU (without initializing CUDA context - important for multiprocessing!)
+    print(f"CUDA Available: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
-        print(f"GPU: {torch.cuda.get_device_name(0)}")
-        print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
-    else:
-        print("GPU: Not available (using CPU)")
+        print(f"CUDA Device Count: {torch.cuda.device_count()}")
+        # Note: Do NOT call torch.cuda.get_device_name() here as it initializes CUDA
+        # and breaks multiprocessing spawn. Workers will initialize CUDA themselves.
 
     # Benchmark configurations
     bench_configs = {
