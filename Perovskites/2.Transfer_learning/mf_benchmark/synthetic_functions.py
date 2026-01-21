@@ -115,18 +115,17 @@ def park_hf(x: np.ndarray) -> np.ndarray:
 
 def park_lf(x: np.ndarray, alpha: float = 0.6) -> np.ndarray:
     """
-    Park function (Low-Fidelity) - Paper SI A.2 Equation (3)
+    Park function (Low-Fidelity) - Modified for proper unfavorable scenario
 
     HF: f(x) = (x1/2)·sqrt((x2 + x3²)x4/x1²) + (x1 + 3·x4)·exp(1 + sin(x3))
 
-    LF: 오직 x4 계수 하나만 변경
-        3 → (3 - 1.5·(1-α))
+    LF: Two modifications for better R² control:
+        1. x4 coefficient: 3 → (3 - 1.5·(1-α))
+        2. exp argument: exp(1 + sin(x3)) → exp(1 + α·sin(x3))
 
-    f(x, α) = (x1/2)·sqrt((x2 + x3²)x4/x1²) + (x1 + [3-1.5(1-α)]·x4)·exp(1 + sin(x3))
-
-    α = 1.0: x4_coef = 3.0 (HF와 동일)
-    α = 0.6: x4_coef = 2.4
-    α = 0.0: x4_coef = 1.5
+    α = 1.0: identical to HF (R² = 1.0)
+    α = 0.6: moderate difference (R² > 0.9, favorable)
+    α = 0.0: large difference (R² < 0.75, unfavorable)
     """
     eps = 1e-8
 
@@ -135,15 +134,16 @@ def park_lf(x: np.ndarray, alpha: float = 0.6) -> np.ndarray:
     x3 = x[:, 2]
     x4 = np.maximum(x[:, 3], eps)
 
-    # 논문 수식: 오직 x4 계수만 α로 변경
+    # Modification 1: x4 coefficient
     x4_coef = 3 - 1.5 * (1 - alpha)
 
-    # term1: HF와 완전히 동일 (논문: -1이 루트 안에 있음)
+    # term1: same as HF
     inner = (x2 + x3**2) * x4 / (x1**2 + eps)
     term1 = (x1 / 2) * np.sqrt(np.maximum(inner, 0))
 
-    # term2: x4 계수만 변경, exp 인자는 그대로
-    term2 = (x1 + x4_coef * x4) * np.exp(1 + np.sin(x3))
+    # term2: x4 coefficient + exp argument modified with alpha
+    # Modification 2: exp(1 + sin(x3)) → exp(1 + alpha*sin(x3))
+    term2 = (x1 + x4_coef * x4) * np.exp(1 + alpha * np.sin(x3))
 
     term1 = np.nan_to_num(term1, nan=0.0, posinf=10.0, neginf=-10.0)
     term2 = np.nan_to_num(term2, nan=0.0, posinf=100.0, neginf=-100.0)
