@@ -794,10 +794,11 @@ class SyntheticBenchmark:
 
 
 class ChemistryBenchmark:
-    def __init__(self, name, csv_path, cost_ratio, use_smiles=False, minimize=True, pca_dim=10):
+    def __init__(self, name, csv_path, cost_ratio, use_smiles=False, minimize=True, negate=False, pca_dim=10):
         self.name = name
         self.cost_ratio = cost_ratio
         self.minimize = minimize
+        self.negate = negate
         self.pca_dim = pca_dim
         df = pd.read_csv(csv_path)
         if use_smiles:
@@ -813,7 +814,13 @@ class ChemistryBenchmark:
         self.X = self.scaler.fit_transform(self.X)
         self.y_hf = df['HF'].values.flatten()
         self.y_lf = df['LF'].values.flatten()
-        self.f_star = self.y_hf.min() if minimize else self.y_hf.max()
+
+        # Negate values for maximize problems (convert to minimize)
+        if negate:
+            self.y_hf = -self.y_hf
+            self.y_lf = -self.y_lf
+
+        self.f_star = self.y_hf.min()  # Always minimize after negation
         self.n_candidates = len(self.X)
         self.dim = self.X.shape[1]
         corr = np.corrcoef(self.y_hf, self.y_lf)[0, 1]
@@ -1019,7 +1026,8 @@ def run_combination(args):
             bench_config['csv_path'],
             bench_config['cost_ratio'],
             bench_config['use_smiles'],
-            bench_config['minimize']
+            bench_config['minimize'],
+            bench_config.get('negate', False)
         )
 
     results_summary = []
@@ -1142,15 +1150,15 @@ def main():
         },
         'COFs': {
             'type': 'chemistry', 'csv_path': data_dir / 'cofs.csv',
-            'cost_ratio': 0.167, 'use_smiles': False, 'minimize': True
+            'cost_ratio': 0.167, 'use_smiles': False, 'minimize': True, 'negate': True  # maximize → negate to minimize
         },
         'FreeSolv': {
             'type': 'chemistry', 'csv_path': data_dir / 'freesolv.csv',
-            'cost_ratio': 0.167, 'use_smiles': True, 'minimize': True
+            'cost_ratio': 0.167, 'use_smiles': True, 'minimize': True, 'negate': False  # minimize solvation energy
         },
         'Polarizability': {
             'type': 'chemistry', 'csv_path': data_dir / 'polarizability.csv',
-            'cost_ratio': 0.1, 'use_smiles': True, 'minimize': True
+            'cost_ratio': 0.1, 'use_smiles': True, 'minimize': True, 'negate': True  # maximize → negate to minimize
         },
     }
 
