@@ -1150,7 +1150,7 @@ def main():
         },
         'Polarizability': {
             'type': 'chemistry', 'csv_path': data_dir / 'polarizability.csv',
-            'cost_ratio': 0.167, 'use_smiles': True, 'minimize': True
+            'cost_ratio': 0.1, 'use_smiles': True, 'minimize': True
         },
     }
 
