@@ -25,6 +25,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import r2_score
 from sklearn.decomposition import PCA
 from scipy.stats import norm
+from scipy.stats.qmc import LatinHypercube
+from scipy.spatial.distance import cdist
 
 # RDKit for molecular descriptors
 from rdkit import Chem
@@ -868,6 +870,84 @@ class ChemistryBenchmark:
 
 
 # =============================================================================
+# Initial Sampling Methods
+# =============================================================================
+
+def furthest_point_sampling(X: np.ndarray, n_samples: int, seed: int = 42) -> np.ndarray:
+    """
+    Furthest Point Sampling for discrete/categorical candidate pools.
+    Selects first point randomly, then iteratively selects the point
+    furthest from all previously selected points.
+
+    Args:
+        X: Feature matrix (n_candidates, n_features)
+        n_samples: Number of samples to select
+        seed: Random seed
+
+    Returns:
+        Array of selected indices
+    """
+    np.random.seed(seed)
+    n_candidates = len(X)
+    n_samples = min(n_samples, n_candidates)
+
+    # Start with random first point
+    selected = [np.random.randint(n_candidates)]
+
+    for _ in range(n_samples - 1):
+        # Compute distances from all points to selected points
+        selected_X = X[selected]
+        distances = cdist(X, selected_X, metric='euclidean')
+        # Minimum distance to any selected point
+        min_distances = distances.min(axis=1)
+        # Set already selected to -inf
+        min_distances[selected] = -np.inf
+        # Select point with maximum minimum distance
+        next_idx = np.argmax(min_distances)
+        selected.append(next_idx)
+
+    return np.array(selected)
+
+
+def latin_hypercube_sampling(bounds: np.ndarray, n_samples: int, seed: int = 42) -> np.ndarray:
+    """
+    Latin Hypercube Sampling for continuous spaces.
+
+    Args:
+        bounds: Array of shape (n_dims, 2) with [min, max] for each dimension
+        n_samples: Number of samples to generate
+        seed: Random seed
+
+    Returns:
+        Array of shape (n_samples, n_dims) with sampled points in [0, 1]^d
+    """
+    n_dims = len(bounds)
+    sampler = LatinHypercube(d=n_dims, seed=seed)
+    samples = sampler.random(n=n_samples)
+
+    # Scale to bounds
+    for i in range(n_dims):
+        samples[:, i] = bounds[i, 0] + samples[:, i] * (bounds[i, 1] - bounds[i, 0])
+
+    return samples
+
+
+def find_nearest_candidates(X_candidates: np.ndarray, X_samples: np.ndarray) -> np.ndarray:
+    """
+    Find nearest candidate indices for LHS samples (for discrete grids).
+
+    Args:
+        X_candidates: Candidate feature matrix
+        X_samples: LHS samples
+
+    Returns:
+        Array of candidate indices nearest to each sample
+    """
+    distances = cdist(X_samples, X_candidates, metric='euclidean')
+    return np.argmin(distances, axis=1)
+
+
+# =============================================================================
 # Acquisition & BO Loop
 # =============================================================================
 
@@ -891,7 +971,19 @@ def select_next(mean, std, y_best, sampled_indices, use_ei=True):
         return np.argmin(mean_masked)
 
 
-def run_bo(benchmark, model_class, budget, seed=42, device=None):
+def run_bo(benchmark, model_class, budget, seed=42, device=None, sampling_method='fps'):
+    """
+    Run Bayesian Optimization.
+
+    Args:
+        benchmark: Benchmark object
+        model_class: Model class to use
+        budget: Total budget
+        seed: Random seed
+        device: Torch device
+        sampling_method: 'fps' for Furthest Point Sampling (categorical),
+                        'lhs' for Latin Hypercube Sampling (continuous)
+    """
     np.random.seed(seed)
     torch.manual_seed(seed)
 
@@ -901,12 +993,41 @@ def run_bo(benchmark, model_class, budget, seed=42, device=None):
     init_budget = 0.1 * budget
     n_init_hf = max(2, int(init_budget * 0.5 / 1.0))
     n_init_lf = max(2, int(init_budget * 0.5 / rho))
+    n_init_total = n_init_lf + n_init_hf
 
-    all_indices = np.arange(n_candidates)
-    np.random.shuffle(all_indices)
+    # Initial sampling based on method
+    if sampling_method == 'lhs':
+        # Latin Hypercube Sampling for continuous/grid-based benchmarks
+        # Sample in [0, 1]^d and find nearest candidates
+        bounds = np.array([[0, 1]] * benchmark.dim)
+        lhs_samples = latin_hypercube_sampling(bounds, n_init_total, seed)
+        # Scale to match candidate space (assuming X is already scaled)
+        X_min, X_max = benchmark.X.min(axis=0), benchmark.X.max(axis=0)
+        X_range = X_max - X_min
+        X_range[X_range == 0] = 1  # Avoid division by zero
+        lhs_samples_scaled = X_min + lhs_samples * X_range
+        init_indices = find_nearest_candidates(benchmark.X, lhs_samples_scaled)
+        # Remove duplicates
+        init_indices = list(dict.fromkeys(init_indices))
+        # If not enough unique indices, add more via FPS
+        if len(init_indices) < n_init_total:
+            remaining = n_init_total - len(init_indices)
+            available = set(range(n_candidates)) - set(init_indices)
+            if available:
+                extra = furthest_point_sampling(
+                    benchmark.X[list(available)],
+                    remaining,
+                    seed + 1000
+                )
+                extra_indices = [list(available)[i] for i in extra]
+                init_indices.extend(extra_indices)
+    else:
+        # Furthest Point Sampling for categorical/chemistry benchmarks
+        init_indices = furthest_point_sampling(benchmark.X, n_init_total, seed).tolist()
 
-    lf_indices = set(all_indices[:n_init_lf].tolist())
-    hf_indices = set(all_indices[n_init_lf:n_init_lf + n_init_hf].tolist())
+    # Split into LF and HF (first n_init_lf for LF, rest for HF)
+    lf_indices = set(init_indices[:n_init_lf])
+    hf_indices = set(init_indices[n_init_lf:n_init_lf + n_init_hf])
 
     X_lf = benchmark.X[list(lf_indices)]
     y_lf = benchmark.evaluate_lf(np.array(list(lf_indices)))
@@ -1030,6 +1151,10 @@ def run_combination(args):
             bench_config.get('negate', False)
         )
 
+    # Determine sampling method based on benchmark type
+    # LHS for continuous/synthetic, FPS for categorical/chemistry
+    sampling_method = 'lhs' if bench_config['type'] == 'synthetic' else 'fps'
+
     results_summary = []
     results_trajectory = []
     start_time = time.time()
@@ -1037,7 +1162,7 @@ def run_combination(args):
     for i, seed in enumerate(seeds):
         seed_start = time.time()
         try:
-            result = run_bo(benchmark, model_class, budget, seed, device)
+            result = run_bo(benchmark, model_class, budget, seed, device, sampling_method)
             seed_elapsed = time.time() - seed_start
 
             # Summary data (one row per seed)
