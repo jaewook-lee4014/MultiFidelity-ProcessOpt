@@ -438,16 +438,60 @@ for _ in range(adapter_epochs):
 
 ---
 
-## 공통 하이퍼파라미터
+## Fixed Hyperparameters
+
+모든 하이퍼파라미터는 **튜닝 없이 고정값**으로 설정됨. 벤치마크 간 공정한 비교를 위해 동일 설정 사용.
+
+### 공통 네트워크 설정
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `hidden_dim` | 64 | Hidden layer size |
+| `hidden_dim` | 64 | Hidden layer dimension |
 | `num_layers` | 2 | Number of hidden layers |
-| `learning_rate` | 1e-3 (LF), 1e-4 (HF) | Adam optimizer |
+| `activation` | Tanh | Activation function |
+| `optimizer` | Adam | Optimizer |
 | `weight_decay` | 1e-4 | L2 regularization |
-| `lf_epochs` | 200 | LF training epochs |
-| `hf_epochs` | 100 | HF training epochs |
+
+### 모델별 하이퍼파라미터
+
+| Model | LF lr | HF lr | LF epochs | HF epochs | 기타 |
+|-------|-------|-------|-----------|-----------|------|
+| **MFGP** | - | - | - | - | BoTorch default optimizer |
+| **Sequential** | 1e-3 | 1e-3 | 200 | 100 | - |
+| **Progressive** | 1e-3 | 1e-3→1e-4 | 100 | 50+50 | epochs_per_stage=50 |
+| **Curriculum** | 1e-3 | 1e-3 | 200 | 200 | - |
+| **Two-Stage Joint** | 1e-3 | 1e-4 | 100 | 100 | loss_weight: 0.3 LF + 0.7 HF |
+| **DNGO-Joint** | 1e-3 | 1e-3 | 300 | 300 | alpha=0.5 (joint) |
+| **DNGO-Gradient** | 1e-3 | 5e-4 | 300 | 300 | different lr per network |
+| **Knowledge Distillation** | 1e-3 | 1e-4 | 200 | 100 | alpha_kd=0.3, T=3.0 |
+| **Domain Adaptation (MMD)** | 1e-3 | 1e-4 | 200 | 100 | lambda_mmd=0.1 |
+| **Soft Parameter Sharing** | 1e-3 | 1e-3 | 200 | 200 | lambda_soft=0.01 |
+| **Pseudo-Labeling** | 1e-3 | 1e-4 | 200 | 100 | pseudo_weight=0.5 |
+| **Adapter** | 1e-3 | 1e-3 | 200 | 100 | bottleneck_dim=16 |
+
+### 모델별 특수 파라미터 상세
+
+| Model | Parameter | Value | 설명 |
+|-------|-----------|-------|------|
+| **Two-Stage Joint** | loss_weight | 0.3:0.7 | LF:HF loss 비율 |
+| **DNGO-Joint** | alpha | 0.5 | LF:HF loss 비율 (0.5:0.5) |
+| **Knowledge Distillation** | alpha_kd | 0.3 | distillation loss 가중치 |
+| | temperature | 3.0 | soft target temperature |
+| **Domain Adaptation** | lambda_mmd | 0.1 | MMD regularization 강도 |
+| | bandwidth | 1.0 | RBF kernel bandwidth |
+| **Soft Parameter Sharing** | lambda_soft | 0.01 | parameter diff regularization |
+| **Pseudo-Labeling** | pseudo_weight | 0.5 | pseudo-label loss 가중치 |
+| **Adapter** | bottleneck_dim | 16 | adapter bottleneck size |
+
+### 선택 근거
+
+- **hidden_dim=64**: 작은 데이터셋에 적합한 크기, overfitting 방지
+- **num_layers=2**: 충분한 표현력 + 학습 안정성
+- **lr=1e-3 (LF), 1e-4 (HF)**: LF는 빠르게, HF는 신중하게 학습
+- **epochs**: LF에 더 많은 학습 (데이터 많음), HF는 적게 (overfitting 방지)
+- **Tanh activation**: bounded output, 수치 안정성
+
+**Note**: 하이퍼파라미터 튜닝 없이 고정값 사용. 최적 성능보다는 공정한 비교에 초점.
 
 ---
 
@@ -455,7 +499,7 @@ for _ in range(adapter_epochs):
 
 | Model | Acquisition | Uncertainty |
 |-------|-------------|-------------|
-| MFGP | Expected Improvement | GP posterior variance |
-| Others (11개) | argmin(mean) | constant 0.1 (dummy) |
+| MFGP | Expected Improvement (EI) | GP posterior variance |
+| Others (11개) | argmin(mean) - greedy | constant 0.1 (dummy) |
 
-**Note**: DNN 모델들은 proper uncertainty estimation이 없어서 pure exploitation (greedy) 전략 사용.
+**Note**: DNN 모델들은 proper uncertainty estimation이 없어서 pure exploitation (greedy) 전략 사용. MFGP만 exploration-exploitation tradeoff를 가짐.
