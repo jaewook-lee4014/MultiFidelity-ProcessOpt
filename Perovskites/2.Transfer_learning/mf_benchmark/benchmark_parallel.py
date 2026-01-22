@@ -1275,15 +1275,15 @@ def main():
         },
         'COFs': {
             'type': 'chemistry', 'csv_path': data_dir / 'cofs.csv',
-            'cost_ratio': 0.167, 'use_smiles': False, 'minimize': True, 'negate': True  # maximize → negate to minimize
+            'cost_ratio': 0.065, 'use_smiles': False, 'minimize': True, 'negate': True  # ρ=0.065, R²=0.98
         },
         'FreeSolv': {
             'type': 'chemistry', 'csv_path': data_dir / 'freesolv.csv',
-            'cost_ratio': 0.167, 'use_smiles': True, 'minimize': True, 'negate': False  # minimize solvation energy
+            'cost_ratio': 0.1, 'use_smiles': True, 'minimize': True, 'negate': False  # ρ=0.1, R²=0.88
         },
         'Polarizability': {
             'type': 'chemistry', 'csv_path': data_dir / 'polarizability.csv',
-            'cost_ratio': 0.1, 'use_smiles': True, 'minimize': True, 'negate': True  # maximize → negate to minimize
+            'cost_ratio': 0.167, 'use_smiles': True, 'minimize': True, 'negate': True  # ρ=0.167, R²=0.99
         },
     }
 
