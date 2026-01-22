@@ -27,6 +27,9 @@ matplotlib>=3.4.0
 # Machine Learning
 scikit-learn>=1.0.0
 
+# Chemistry (RDKit for molecular descriptors)
+rdkit>=2023.3.1
+
 # PyTorch (install separately for specific architecture - see above)
 torch>=2.0.0
 

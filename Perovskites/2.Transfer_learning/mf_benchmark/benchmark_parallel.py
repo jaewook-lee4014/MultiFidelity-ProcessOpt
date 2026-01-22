@@ -23,7 +23,13 @@ from datetime import datetime
 from typing import Tuple, List, Dict, Any
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import r2_score
+from sklearn.decomposition import PCA
 from scipy.stats import norm
+
+# RDKit for molecular descriptors
+from rdkit import Chem
+from rdkit.Chem import Descriptors
+from rdkit.ML.Descriptors import MoleculeDescriptors
 import argparse
 import multiprocessing as mp
 from multiprocessing import Pool, Manager
@@ -788,17 +794,18 @@ class SyntheticBenchmark:
 
 
 class ChemistryBenchmark:
-    def __init__(self, name, csv_path, cost_ratio, use_smiles=False, minimize=True):
+    def __init__(self, name, csv_path, cost_ratio, use_smiles=False, minimize=True, pca_dim=10):
         self.name = name
         self.cost_ratio = cost_ratio
         self.minimize = minimize
+        self.pca_dim = pca_dim
         df = pd.read_csv(csv_path)
         if use_smiles:
             smiles_col = [c for c in df.columns if 'smiles' in c.lower()]
             if smiles_col:
-                self.X = self._smiles_to_features(df[smiles_col[0]].values)
+                self.X = self._smiles_to_rdkit_features(df[smiles_col[0]].values)
             else:
-                self.X = self._smiles_to_features(df.iloc[:, 0].values)
+                self.X = self._smiles_to_rdkit_features(df.iloc[:, 0].values)
         else:
             feature_cols = [c for c in df.columns if c not in ['HF', 'LF']]
             self.X = df[feature_cols].values
@@ -812,15 +819,39 @@ class ChemistryBenchmark:
         corr = np.corrcoef(self.y_hf, self.y_lf)[0, 1]
         self.r2 = corr ** 2
 
-    def _smiles_to_features(self, smiles_list):
+    def _smiles_to_rdkit_features(self, smiles_list):
+        """Convert SMILES to RDKit 2D descriptors and reduce with PCA to pca_dim dimensions."""
+        # Get all available 2D descriptor names
+        descriptor_names = [desc[0] for desc in Descriptors._descList]
+        calc = MoleculeDescriptors.MolecularDescriptorCalculator(descriptor_names)
+
         features = []
-        for smi in smiles_list:
-            feat = [len(smi), smi.count('C'), smi.count('N'), smi.count('O'),
-                    smi.count('F'), smi.count('Cl'), smi.count('Br'), smi.count('S'),
-                    smi.count('('), smi.count('='), smi.count('#'), smi.count('['),
-                    smi.count('c'), smi.count('n'), smi.count('1') + smi.count('2')]
-            features.append(feat)
-        return np.array(features)
+        valid_indices = []
+        for i, smi in enumerate(smiles_list):
+            mol = Chem.MolFromSmiles(smi)
+            if mol is not None:
+                desc = calc.CalcDescriptors(mol)
+                features.append(desc)
+                valid_indices.append(i)
+            else:
+                # Fallback for invalid SMILES
+                features.append([0.0] * len(descriptor_names))
+                valid_indices.append(i)
+
+        features = np.array(features, dtype=np.float64)
+
+        # Handle NaN/Inf values
+        features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # Standardize before PCA
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features)
+
+        # Apply PCA to reduce to pca_dim dimensions
+        pca = PCA(n_components=self.pca_dim)
+        features_pca = pca.fit_transform(features_scaled)
+
+        return features_pca
 
     def evaluate_hf(self, indices):
         return self.y_hf[indices.astype(int).flatten()]
