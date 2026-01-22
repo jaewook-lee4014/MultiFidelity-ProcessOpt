@@ -991,13 +991,18 @@ def run_combination(args):
             bench_config['minimize']
         )
 
-    results = []
+    results_summary = []
+    results_trajectory = []
     start_time = time.time()
 
     for i, seed in enumerate(seeds):
+        seed_start = time.time()
         try:
             result = run_bo(benchmark, model_class, budget, seed, device)
-            results.append({
+            seed_elapsed = time.time() - seed_start
+
+            # Summary data (one row per seed)
+            results_summary.append({
                 'benchmark': bench_name,
                 'model': model_name,
                 'seed': seed,
@@ -1005,9 +1010,22 @@ def run_combination(args):
                 'n_hf': result['n_hf'],
                 'n_lf': result['n_lf'],
                 'best_y': result['best_y'],
+                'elapsed_sec': round(seed_elapsed, 3),
             })
+
+            # Trajectory data (one row per budget step)
+            for b, r in zip(result['budgets'], result['regrets']):
+                results_trajectory.append({
+                    'benchmark': bench_name,
+                    'model': model_name,
+                    'seed': seed,
+                    'budget': round(b, 2),
+                    'regret': r,
+                })
+
         except Exception as e:
-            results.append({
+            seed_elapsed = time.time() - seed_start
+            results_summary.append({
                 'benchmark': bench_name,
                 'model': model_name,
                 'seed': seed,
@@ -1015,21 +1033,28 @@ def run_combination(args):
                 'n_hf': 0,
                 'n_lf': 0,
                 'best_y': np.nan,
+                'elapsed_sec': round(seed_elapsed, 3),
             })
 
     elapsed = time.time() - start_time
 
-    # Save results for this combination
-    df = pd.DataFrame(results)
-    result_file = output_dir / f'results_{bench_name}_{model_name.replace(" ", "_")}.csv'
-    df.to_csv(result_file, index=False)
+    # Save summary results
+    df_summary = pd.DataFrame(results_summary)
+    summary_file = output_dir / f'summary_{bench_name}_{model_name.replace(" ", "_")}.csv'
+    df_summary.to_csv(summary_file, index=False)
+
+    # Save trajectory results
+    df_trajectory = pd.DataFrame(results_trajectory)
+    trajectory_file = output_dir / f'trajectory_{bench_name}_{model_name.replace(" ", "_")}.csv'
+    df_trajectory.to_csv(trajectory_file, index=False)
 
     return {
         'bench_name': bench_name,
         'model_name': model_name,
         'n_seeds': len(seeds),
         'elapsed': elapsed,
-        'results': results
+        'results_summary': results_summary,
+        'results_trajectory': results_trajectory
     }
 
 
@@ -1086,22 +1111,22 @@ def main():
         },
         'COFs': {
             'type': 'chemistry', 'csv_path': data_dir / 'cofs.csv',
-            'cost_ratio': 0.1, 'use_smiles': False, 'minimize': True
+            'cost_ratio': 0.167, 'use_smiles': False, 'minimize': True
         },
         'FreeSolv': {
             'type': 'chemistry', 'csv_path': data_dir / 'freesolv.csv',
-            'cost_ratio': 0.1, 'use_smiles': True, 'minimize': True
+            'cost_ratio': 0.167, 'use_smiles': True, 'minimize': True
         },
         'Polarizability': {
             'type': 'chemistry', 'csv_path': data_dir / 'polarizability.csv',
-            'cost_ratio': 0.1, 'use_smiles': True, 'minimize': True
+            'cost_ratio': 0.167, 'use_smiles': True, 'minimize': True
         },
     }
 
     budgets = {
         'Branin-Fav': 50, 'Branin-Unfav': 50,
         'Park-Fav': 50, 'Park-Unfav': 50,
-        'COFs': 30, 'FreeSolv': 30, 'Polarizability': 30,
+        'COFs': 30, 'FreeSolv': 50, 'Polarizability': 30,
     }
 
     models = {
@@ -1154,25 +1179,32 @@ def main():
 
     total_time = time.time() - start_time
 
-    # Merge all results
-    all_results = []
+    # Merge all summary results
+    all_summary = []
+    all_trajectory = []
     for r in results:
-        all_results.extend(r['results'])
+        all_summary.extend(r['results_summary'])
+        all_trajectory.extend(r['results_trajectory'])
 
-    df = pd.DataFrame(all_results)
-    df.to_csv(output_dir / 'results.csv', index=False)
+    df_summary = pd.DataFrame(all_summary)
+    df_summary.to_csv(output_dir / 'results_summary.csv', index=False)
+
+    df_trajectory = pd.DataFrame(all_trajectory)
+    df_trajectory.to_csv(output_dir / 'results_trajectory.csv', index=False)
 
     print("\n" + "=" * 80)
     print(f"Completed in {total_time/60:.1f} minutes ({total_time/3600:.2f} hours)")
     print(f"Results saved to: {output_dir}")
+    print(f"  - results_summary.csv: {len(df_summary)} rows (final metrics)")
+    print(f"  - results_trajectory.csv: {len(df_trajectory)} rows (budget vs regret)")
     print("=" * 80)
 
     # Summary
     print("\nSUMMARY (Mean Final Regret)")
     print("-" * 60)
-    for bench in df['benchmark'].unique():
+    for bench in df_summary['benchmark'].unique():
         print(f"\n{bench}:")
-        summary = df[df['benchmark'] == bench].groupby('model')['final_regret'].agg(['mean', 'std'])
+        summary = df_summary[df_summary['benchmark'] == bench].groupby('model')['final_regret'].agg(['mean', 'std'])
         summary = summary.sort_values('mean')
         for model, row in summary.head(3).iterrows():
             print(f"  {model:<30}: {row['mean']:.4f} ± {row['std']:.4f}")
