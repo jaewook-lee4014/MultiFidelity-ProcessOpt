@@ -1,0 +1,21 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+FreeSolv,Two-Stage Joint,42,0.30000000000000027,24,259,-3.13,78.295
+FreeSolv,Two-Stage Joint,43,0.27,24,259,-3.16,78.189
+FreeSolv,Two-Stage Joint,44,0.30000000000000027,24,259,-3.13,77.624
+FreeSolv,Two-Stage Joint,45,0.30000000000000027,24,259,-3.13,77.148
+FreeSolv,Two-Stage Joint,46,0.30000000000000027,24,259,-3.13,77.14
+FreeSolv,Two-Stage Joint,47,0.30000000000000027,24,259,-3.13,77.651
+FreeSolv,Two-Stage Joint,48,0.31000000000000005,24,259,-3.12,78.036
+FreeSolv,Two-Stage Joint,49,0.27,24,259,-3.16,78.001
+FreeSolv,Two-Stage Joint,50,0.27,24,259,-3.16,77.646
+FreeSolv,Two-Stage Joint,51,0.27,24,259,-3.16,78.003
+FreeSolv,Two-Stage Joint,52,0.30000000000000027,24,259,-3.13,77.538
+FreeSolv,Two-Stage Joint,53,0.27,24,259,-3.16,77.823
+FreeSolv,Two-Stage Joint,54,0.30000000000000027,24,259,-3.13,77.71
+FreeSolv,Two-Stage Joint,55,0.27,24,259,-3.16,77.959
+FreeSolv,Two-Stage Joint,56,0.27,24,259,-3.16,78.023
+FreeSolv,Two-Stage Joint,57,0.30000000000000027,24,259,-3.13,77.966
+FreeSolv,Two-Stage Joint,58,0.31000000000000005,24,259,-3.12,77.704
+FreeSolv,Two-Stage Joint,59,0.27,24,259,-3.16,77.784
+FreeSolv,Two-Stage Joint,60,0.27,24,259,-3.16,77.549
+FreeSolv,Two-Stage Joint,61,0.30000000000000027,24,259,-3.13,78.205

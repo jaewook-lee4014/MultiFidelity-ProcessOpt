@@ -1,0 +1,21 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Polarizability,Two-Stage Joint,42,0.0,16,83,-1.0,26.523
+Polarizability,Two-Stage Joint,43,0.08919437340153435,16,83,-0.9108056265984656,26.527
+Polarizability,Two-Stage Joint,44,0.0,16,83,-1.0,26.499
+Polarizability,Two-Stage Joint,45,0.08919437340153435,16,83,-0.9108056265984656,26.532
+Polarizability,Two-Stage Joint,46,0.0,16,83,-1.0,26.549
+Polarizability,Two-Stage Joint,47,0.08919437340153435,16,83,-0.9108056265984656,26.409
+Polarizability,Two-Stage Joint,48,0.0,16,83,-1.0,26.745
+Polarizability,Two-Stage Joint,49,0.08919437340153435,16,83,-0.9108056265984656,26.379
+Polarizability,Two-Stage Joint,50,0.08919437340153435,16,83,-0.9108056265984656,26.407
+Polarizability,Two-Stage Joint,51,0.0,16,83,-1.0,26.609
+Polarizability,Two-Stage Joint,52,0.0,16,83,-1.0,26.299
+Polarizability,Two-Stage Joint,53,0.08919437340153435,16,83,-0.9108056265984656,26.511
+Polarizability,Two-Stage Joint,54,0.08919437340153435,16,83,-0.9108056265984656,26.539
+Polarizability,Two-Stage Joint,55,0.08919437340153435,16,83,-0.9108056265984656,26.414
+Polarizability,Two-Stage Joint,56,0.08919437340153435,16,83,-0.9108056265984656,26.476
+Polarizability,Two-Stage Joint,57,0.08919437340153435,16,83,-0.9108056265984656,26.395
+Polarizability,Two-Stage Joint,58,0.0,16,83,-1.0,26.215
+Polarizability,Two-Stage Joint,59,0.08919437340153435,16,83,-0.9108056265984656,26.442
+Polarizability,Two-Stage Joint,60,0.08919437340153435,16,83,-0.9108056265984656,26.487
+Polarizability,Two-Stage Joint,61,0.08919437340153435,16,83,-0.9108056265984656,26.466
