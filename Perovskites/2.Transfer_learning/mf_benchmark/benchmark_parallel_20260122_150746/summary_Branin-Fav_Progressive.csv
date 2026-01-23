@@ -1,0 +1,2 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Branin-Fav,Progressive,42,0.7759110906150174,24,259,1.1737980906150174,193.65

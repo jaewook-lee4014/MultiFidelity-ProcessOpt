@@ -1,0 +1,2 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+COFs,Soft Parameter Sharing,42,8.522637989842249,15,230,-10.01184795799001,244.019

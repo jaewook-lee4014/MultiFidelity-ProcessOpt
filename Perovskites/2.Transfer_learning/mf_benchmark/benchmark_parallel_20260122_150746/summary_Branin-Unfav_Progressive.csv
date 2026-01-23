@@ -1,0 +1,2 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Branin-Unfav,Progressive,42,4.57687635040767,24,52,4.97476335040767,56.645

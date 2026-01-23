@@ -1,0 +1,2 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Branin-Fav,Domain Adaptation (MMD),42,0.3474885137832534,24,259,0.7453755137832534,331.909

@@ -1,0 +1,2 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+FreeSolv,Knowledge Distillation,42,0.5,24,259,-2.93,217.917

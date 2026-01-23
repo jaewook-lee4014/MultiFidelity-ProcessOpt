@@ -1,0 +1,21 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+FreeSolv,Domain Adaptation (MMD),42,0.5500000000000003,24,259,-2.88,140.368
+FreeSolv,Domain Adaptation (MMD),43,1.5100000000000002,24,259,-1.92,141.424
+FreeSolv,Domain Adaptation (MMD),44,0.9200000000000004,24,259,-2.51,139.326
+FreeSolv,Domain Adaptation (MMD),45,0.5500000000000003,24,259,-2.88,139.545
+FreeSolv,Domain Adaptation (MMD),46,1.37,24,259,-2.06,139.689
+FreeSolv,Domain Adaptation (MMD),47,0.5500000000000003,24,259,-2.88,141.187
+FreeSolv,Domain Adaptation (MMD),48,1.33,24,259,-2.1,142.222
+FreeSolv,Domain Adaptation (MMD),49,0.45999999999999996,24,259,-2.97,141.721
+FreeSolv,Domain Adaptation (MMD),50,0.5,24,259,-2.93,143.868
+FreeSolv,Domain Adaptation (MMD),51,0.5,24,259,-2.93,143.047
+FreeSolv,Domain Adaptation (MMD),52,0.8700000000000001,24,259,-2.56,141.504
+FreeSolv,Domain Adaptation (MMD),53,0.6000000000000001,24,259,-2.83,142.864
+FreeSolv,Domain Adaptation (MMD),54,0.45999999999999996,24,259,-2.97,143.013
+FreeSolv,Domain Adaptation (MMD),55,0.5,24,259,-2.93,142.743
+FreeSolv,Domain Adaptation (MMD),56,1.37,24,259,-2.06,141.612
+FreeSolv,Domain Adaptation (MMD),57,0.54,24,259,-2.89,139.936
+FreeSolv,Domain Adaptation (MMD),58,0.7600000000000002,24,259,-2.67,141.008
+FreeSolv,Domain Adaptation (MMD),59,0.8800000000000003,24,259,-2.55,139.294
+FreeSolv,Domain Adaptation (MMD),60,0.7200000000000002,24,259,-2.71,139.597
+FreeSolv,Domain Adaptation (MMD),61,1.9600000000000002,24,259,-1.47,138.417

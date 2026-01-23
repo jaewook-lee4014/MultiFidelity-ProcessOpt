@@ -1,0 +1,2 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+FreeSolv,Domain Adaptation (MMD),42,0.30000000000000027,24,259,-3.13,259.723

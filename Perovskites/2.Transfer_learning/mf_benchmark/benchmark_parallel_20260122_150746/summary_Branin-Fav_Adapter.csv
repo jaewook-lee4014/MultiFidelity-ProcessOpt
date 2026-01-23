@@ -1,0 +1,2 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Branin-Fav,Adapter,42,1.2712552403386868,24,259,1.6691422403386866,282.445

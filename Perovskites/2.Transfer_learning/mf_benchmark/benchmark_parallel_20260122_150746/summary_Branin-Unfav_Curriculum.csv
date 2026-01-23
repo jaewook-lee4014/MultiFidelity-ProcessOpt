@@ -1,0 +1,2 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Branin-Unfav,Curriculum,42,0.6655115547894795,24,52,1.0633985547894795,78.447

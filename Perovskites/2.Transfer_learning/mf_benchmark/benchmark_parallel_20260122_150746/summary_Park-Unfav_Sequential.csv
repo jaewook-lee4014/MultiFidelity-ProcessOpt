@@ -1,0 +1,2 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Park-Unfav,Sequential,42,1.1161802446987618e-07,24,52,1.1161802446987618e-07,61.034

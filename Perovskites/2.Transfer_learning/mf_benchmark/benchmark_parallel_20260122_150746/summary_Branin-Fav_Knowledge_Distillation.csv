@@ -1,0 +1,2 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Branin-Fav,Knowledge Distillation,42,0.621405597681515,24,259,1.019292597681515,251.2

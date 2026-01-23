@@ -1,0 +1,2 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Branin-Fav,Two-Stage Joint,42,0.0066056977871608025,24,259,0.4044926977871608,256.384

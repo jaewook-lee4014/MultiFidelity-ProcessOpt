@@ -1,0 +1,21 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Polarizability,Domain Adaptation (MMD),42,0.21483375959079287,16,83,-0.7851662404092071,46.599
+Polarizability,Domain Adaptation (MMD),43,0.24648337595907932,16,83,-0.7535166240409207,46.591
+Polarizability,Domain Adaptation (MMD),44,0.15281329923273657,16,83,-0.8471867007672634,46.705
+Polarizability,Domain Adaptation (MMD),45,0.09303069053708435,16,83,-0.9069693094629157,46.594
+Polarizability,Domain Adaptation (MMD),46,0.0,16,83,-1.0,47.016
+Polarizability,Domain Adaptation (MMD),47,0.2119565217391305,16,83,-0.7880434782608695,47.189
+Polarizability,Domain Adaptation (MMD),48,0.0,16,83,-1.0,47.429
+Polarizability,Domain Adaptation (MMD),49,0.21547314578005117,16,83,-0.7845268542199488,47.61
+Polarizability,Domain Adaptation (MMD),50,0.2119565217391305,16,83,-0.7880434782608695,47.756
+Polarizability,Domain Adaptation (MMD),51,0.0,16,83,-1.0,47.628
+Polarizability,Domain Adaptation (MMD),52,0.0,16,83,-1.0,47.68
+Polarizability,Domain Adaptation (MMD),53,0.2320971867007673,16,83,-0.7679028132992327,47.558
+Polarizability,Domain Adaptation (MMD),54,0.08919437340153435,16,83,-0.9108056265984656,47.352
+Polarizability,Domain Adaptation (MMD),55,0.08919437340153435,16,83,-0.9108056265984656,47.471
+Polarizability,Domain Adaptation (MMD),56,0.1275575447570333,16,83,-0.8724424552429667,47.471
+Polarizability,Domain Adaptation (MMD),57,0.09303069053708435,16,83,-0.9069693094629157,47.521
+Polarizability,Domain Adaptation (MMD),58,0.0,16,83,-1.0,47.325
+Polarizability,Domain Adaptation (MMD),59,0.15281329923273657,16,83,-0.8471867007672634,46.086
+Polarizability,Domain Adaptation (MMD),60,0.24648337595907932,16,83,-0.7535166240409207,46.04
+Polarizability,Domain Adaptation (MMD),61,0.2119565217391305,16,83,-0.7880434782608695,46.021

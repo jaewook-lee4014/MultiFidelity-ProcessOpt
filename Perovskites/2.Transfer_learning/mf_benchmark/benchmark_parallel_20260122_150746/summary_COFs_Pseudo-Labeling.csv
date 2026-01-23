@@ -1,0 +1,2 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+COFs,Pseudo-Labeling,42,10.909045986557041,15,230,-7.625439961275218,214.144

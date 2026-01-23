@@ -1,0 +1,2 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Branin-Fav,DNGO-Gradient,42,0.2831528012458929,24,259,0.6810398012458929,409.418
