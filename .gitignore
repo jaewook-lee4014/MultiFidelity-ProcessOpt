@@ -1,1 +1,26 @@
+# Heavy / raw data (do not push)
 /Process/3. Data
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# OS / editor cruft
+.DS_Store
+.idea/
+.vscode/
+
+# Jupyter / IPython
+.ipynb_checkpoints/
+
+# Environments
+.env
+.venv/
+venv/
+env/
+
+# Local scratch (uncomment if you have one)
+# /scratch/
