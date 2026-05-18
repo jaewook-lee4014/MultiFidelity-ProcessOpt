@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+COFs,Knowledge Distillation,adaptive,42,0.0,25,76,-18.53448594783226,53.531
+COFs,Knowledge Distillation,adaptive,43,0.36350643408100325,26,61,-18.170979513751256,56.37
+COFs,Knowledge Distillation,adaptive,44,0.0,25,76,-18.53448594783226,68.981
+COFs,Knowledge Distillation,adaptive,45,0.0,25,76,-18.53448594783226,69.601
+COFs,Knowledge Distillation,adaptive,46,0.0,24,92,-18.53448594783226,82.561
+COFs,Knowledge Distillation,adaptive,47,0.0,25,76,-18.53448594783226,69.705
+COFs,Knowledge Distillation,adaptive,48,0.0,24,92,-18.53448594783226,83.255
+COFs,Knowledge Distillation,adaptive,49,0.0,25,76,-18.53448594783226,69.494
+COFs,Knowledge Distillation,adaptive,50,0.0,25,76,-18.53448594783226,69.498
+COFs,Knowledge Distillation,adaptive,51,0.0,25,76,-18.53448594783226,68.964
+COFs,Knowledge Distillation,adaptive,52,0.0,25,76,-18.53448594783226,68.674
+COFs,Knowledge Distillation,adaptive,53,0.0,25,76,-18.53448594783226,69.131
+COFs,Knowledge Distillation,adaptive,54,0.0,25,76,-18.53448594783226,66.521
+COFs,Knowledge Distillation,adaptive,55,0.36350643408100325,26,61,-18.170979513751256,54.856
+COFs,Knowledge Distillation,adaptive,56,0.36350643408100325,26,61,-18.170979513751256,54.551
+COFs,Knowledge Distillation,adaptive,57,0.0,26,61,-18.53448594783226,54.336
+COFs,Knowledge Distillation,adaptive,58,0.36350643408100325,26,61,-18.170979513751256,52.433
+COFs,Knowledge Distillation,adaptive,59,0.36350643408100325,26,61,-18.170979513751256,49.574
+COFs,Knowledge Distillation,adaptive,60,0.36350643408100325,26,61,-18.170979513751256,48.581
+COFs,Knowledge Distillation,adaptive,61,0.36350643408100325,27,46,-18.170979513751256,37.113

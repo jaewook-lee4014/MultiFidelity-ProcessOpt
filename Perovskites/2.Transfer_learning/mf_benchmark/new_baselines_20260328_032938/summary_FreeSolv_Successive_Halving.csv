@@ -1,0 +1,21 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+FreeSolv,Successive Halving,42,1.7500000000000002,45,46,-1.68,0.01
+FreeSolv,Successive Halving,43,0.9200000000000004,45,46,-2.51,0.007
+FreeSolv,Successive Halving,44,0.5,45,46,-2.93,0.004
+FreeSolv,Successive Halving,45,0.30000000000000027,45,46,-3.13,0.005
+FreeSolv,Successive Halving,46,0.9100000000000001,45,46,-2.52,0.007
+FreeSolv,Successive Halving,47,0.9100000000000001,45,46,-2.52,0.007
+FreeSolv,Successive Halving,48,0.31000000000000005,45,46,-3.12,0.008
+FreeSolv,Successive Halving,49,0.9200000000000004,45,46,-2.51,0.004
+FreeSolv,Successive Halving,50,0.54,45,46,-2.89,0.004
+FreeSolv,Successive Halving,51,1.0900000000000003,45,46,-2.34,0.004
+FreeSolv,Successive Halving,52,0.45999999999999996,45,46,-2.97,0.004
+FreeSolv,Successive Halving,53,0.6000000000000001,45,46,-2.83,0.004
+FreeSolv,Successive Halving,54,1.0500000000000003,45,46,-2.38,0.004
+FreeSolv,Successive Halving,55,2.2700000000000005,45,46,-1.16,0.004
+FreeSolv,Successive Halving,56,0.27,45,46,-3.16,0.004
+FreeSolv,Successive Halving,57,0.5,45,46,-2.93,0.004
+FreeSolv,Successive Halving,58,0.5500000000000003,45,46,-2.88,0.004
+FreeSolv,Successive Halving,59,0.9100000000000001,45,46,-2.52,0.004
+FreeSolv,Successive Halving,60,0.5,45,46,-2.93,0.004
+FreeSolv,Successive Halving,61,1.37,45,46,-2.06,0.004

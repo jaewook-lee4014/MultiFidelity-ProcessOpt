@@ -123,14 +123,16 @@ class DNGO_MFGP(BaseMFModel):
     DNGO with MFGP-style approach:
     - Train feature extractor on combined LF+HF data
     - Use BLR on HF predictions
+    - L2 regularization applied via weight_decay in optimizer
     """
 
     def __init__(self, input_dim: int, hidden_dim: int = 128,
-                 lr: float = 0.01, epochs: int = 300):
+                 lr: float = 0.01, epochs: int = 300, l2_lambda: float = 1e-3):
         super().__init__(input_dim)
         self.hidden_dim = hidden_dim
         self.lr = lr
         self.epochs = epochs
+        self.l2_lambda = l2_lambda  # L2 regularization strength
         self.scaler_x = StandardScaler()
         self.scaler_y = StandardScaler()
 
@@ -161,7 +163,9 @@ class DNGO_MFGP(BaseMFModel):
         y_t = torch.FloatTensor(y_scaled).to(device)
 
         self.network = self._build_network()
-        optimizer = torch.optim.Adam(self.network.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(
+            self.network.parameters(), lr=self.lr, weight_decay=self.l2_lambda
+        )
 
         self.network.train()
         for _ in range(self.epochs):
@@ -181,8 +185,8 @@ class DNGO_MFGP(BaseMFModel):
         with torch.no_grad():
             Phi = self.network(X_hf_t).cpu().numpy()
 
-        # BLR parameters
-        alpha, beta = 0.1, 2.0
+        # BLR parameters - match model_comparison settings
+        alpha, beta = 1.0, 25.0
         A = alpha * np.eye(Phi.shape[1]) + beta * Phi.T @ Phi
         self.A_inv = np.linalg.inv(A + 1e-6 * np.eye(A.shape[0]))
         self.m = beta * self.A_inv @ Phi.T @ y_hf_scaled
@@ -219,15 +223,18 @@ class DNGO_Joint(BaseMFModel):
     - loss = (1-alpha)*LF_loss + alpha*HF_loss
     - HF network takes LF prediction as additional input (residual learning)
     - BLR on HF features for uncertainty
+    - L2 regularization applied via weight_decay in optimizer
     """
 
     def __init__(self, input_dim: int, hidden_dim: int = 128,
-                 lr: float = 0.01, epochs: int = 300, alpha: float = 0.2):
+                 lr: float = 0.01, epochs: int = 300, alpha: float = 0.2,
+                 l2_lambda: float = 1e-3):
         super().__init__(input_dim)
         self.hidden_dim = hidden_dim
         self.lr = lr
         self.epochs = epochs
         self.alpha = alpha  # Weight for HF loss
+        self.l2_lambda = l2_lambda  # L2 regularization strength
         self.scaler_x = StandardScaler()
         self.scaler_y = StandardScaler()
 
@@ -275,11 +282,12 @@ class DNGO_Joint(BaseMFModel):
 
         optimizer = torch.optim.Adam(
             list(self.lf_network.parameters()) + list(self.hf_network.parameters()),
-            lr=self.lr
+            lr=self.lr,
+            weight_decay=self.l2_lambda  # L2 regularization
         )
         loss_fn = nn.MSELoss()
 
-        # Joint training
+        # Joint training with L2 regularization
         for _ in range(self.epochs):
             optimizer.zero_grad()
 
@@ -308,7 +316,7 @@ class DNGO_Joint(BaseMFModel):
             hf_input = torch.cat([X_hf_t, y_lf_for_hf], dim=1)
             Phi = self.hf_network(hf_input).cpu().numpy()
 
-        alpha_blr, beta = 0.1, 2.0
+        alpha_blr, beta = 1.0, 25.0  # Match model_comparison settings
         A = alpha_blr * np.eye(Phi.shape[1]) + beta * Phi.T @ Phi
         self.A_inv = np.linalg.inv(A + 1e-6 * np.eye(A.shape[0]))
         self.m = beta * self.A_inv @ Phi.T @ y_hf_scaled
@@ -339,21 +347,218 @@ class DNGO_Joint(BaseMFModel):
         return mean, std
 
 
+class DNGO_Sequential(BaseMFModel):
+    """
+    DNGO with Sequential Training (prevents LF collapse):
+    - Stage 1: Train LF network on LF data only
+    - Stage 2: Freeze LF network, train HF network on HF data only
+    - HF network learns residual: y_hf = y_lf_pred + delta
+    - BLR on HF features for uncertainty
+    - L2 regularization applied via weight_decay in optimizer
+
+    This avoids the joint training collapse where LF parameters degrade.
+    """
+
+    def __init__(self, input_dim: int, hidden_dim: int = 64,
+                 lf_lr: float = 1e-3, hf_lr: float = 1e-3,
+                 lf_epochs: int = 300, hf_epochs: int = 200,
+                 num_layers: int = 2, l2_lambda: float = 1e-3,
+                 feature_dim: int = 50):
+        super().__init__(input_dim)
+        self.hidden_dim = hidden_dim
+        self.lf_lr = lf_lr
+        self.hf_lr = hf_lr
+        self.lf_epochs = lf_epochs
+        self.hf_epochs = hf_epochs
+        self.num_layers = num_layers
+        self.l2_lambda = l2_lambda  # L2 regularization strength
+        self.feature_dim = feature_dim
+        self.scaler_x = StandardScaler()
+        self.scaler_y = StandardScaler()
+
+    def _build_lf_network(self):
+        """LF network: Input -> Hidden layers -> 1 output"""
+        layers = []
+        in_dim = self.input_dim
+        for _ in range(self.num_layers):
+            layers.append(nn.Linear(in_dim, self.hidden_dim))
+            layers.append(nn.Tanh())
+            in_dim = self.hidden_dim
+        layers.append(nn.Linear(self.hidden_dim, 1))
+        return nn.Sequential(*layers).to(device)
+
+    def _build_hf_network(self):
+        """HF network: (Input + LF_pred) -> Hidden layers -> feature_dim for BLR"""
+        layers = []
+        in_dim = self.input_dim + 1  # +1 for LF prediction
+        for _ in range(self.num_layers):
+            layers.append(nn.Linear(in_dim, self.hidden_dim))
+            layers.append(nn.Tanh())
+            in_dim = self.hidden_dim
+        layers.append(nn.Linear(self.hidden_dim, self.feature_dim))
+        return nn.Sequential(*layers).to(device)
+
+    def fit(self, X_lf: np.ndarray, y_lf: np.ndarray,
+            X_hf: np.ndarray, y_hf: np.ndarray):
+        # Scale data
+        X_all = np.vstack([X_lf, X_hf])
+        y_all = np.concatenate([y_lf.flatten(), y_hf.flatten()])
+
+        X_scaled = self.scaler_x.fit_transform(X_all)
+        y_scaled = self.scaler_y.fit_transform(y_all.reshape(-1, 1)).flatten()
+
+        X_lf_scaled = X_scaled[:len(X_lf)]
+        X_hf_scaled = X_scaled[len(X_lf):]
+        y_lf_scaled = y_scaled[:len(y_lf)]
+        y_hf_scaled = y_scaled[len(y_lf):]
+
+        X_lf_t = torch.FloatTensor(X_lf_scaled).to(device)
+        y_lf_t = torch.FloatTensor(y_lf_scaled).view(-1, 1).to(device)
+        X_hf_t = torch.FloatTensor(X_hf_scaled).to(device)
+        y_hf_t = torch.FloatTensor(y_hf_scaled).view(-1, 1).to(device)
+
+        self.lf_network = self._build_lf_network()
+        self.hf_network = self._build_hf_network()
+
+        loss_fn = nn.MSELoss()
+
+        # ============================================
+        # Stage 1: Train LF network on LF data only (with L2 regularization)
+        # ============================================
+        lf_optimizer = torch.optim.Adam(
+            self.lf_network.parameters(),
+            lr=self.lf_lr,
+            weight_decay=self.l2_lambda  # L2 regularization
+        )
+
+        self.lf_network.train()
+        for epoch in range(self.lf_epochs):
+            lf_optimizer.zero_grad()
+            y_lf_pred = self.lf_network(X_lf_t)
+            lf_loss = loss_fn(y_lf_pred, y_lf_t)
+            lf_loss.backward()
+            lf_optimizer.step()
+
+        # ============================================
+        # Stage 2: Freeze LF, train HF network on HF data (with L2 regularization)
+        # ============================================
+        # Freeze LF network
+        for param in self.lf_network.parameters():
+            param.requires_grad = False
+        self.lf_network.eval()
+
+        hf_optimizer = torch.optim.Adam(
+            self.hf_network.parameters(),
+            lr=self.hf_lr,
+            weight_decay=self.l2_lambda  # L2 regularization
+        )
+
+        self.hf_network.train()
+        for epoch in range(self.hf_epochs):
+            hf_optimizer.zero_grad()
+
+            # Get LF prediction (frozen)
+            with torch.no_grad():
+                y_lf_for_hf = self.lf_network(X_hf_t)
+
+            # HF network input: [x, y_lf_pred]
+            hf_input = torch.cat([X_hf_t, y_lf_for_hf], dim=1)
+            hf_features = self.hf_network(hf_input)
+
+            # Predict HF as: y_lf + delta (residual learning)
+            delta = hf_features.mean(dim=1, keepdim=True)
+            y_hf_pred = y_lf_for_hf + delta
+
+            hf_loss = loss_fn(y_hf_pred, y_hf_t)
+            hf_loss.backward()
+            hf_optimizer.step()
+
+        # Unfreeze for future use (if needed)
+        for param in self.lf_network.parameters():
+            param.requires_grad = True
+
+        # ============================================
+        # BLR on HF features
+        # ============================================
+        self.lf_network.eval()
+        self.hf_network.eval()
+        with torch.no_grad():
+            y_lf_for_hf = self.lf_network(X_hf_t)
+            hf_input = torch.cat([X_hf_t, y_lf_for_hf], dim=1)
+            Phi = self.hf_network(hf_input).cpu().numpy()
+
+        # BLR parameters - match model_comparison settings
+        alpha_blr, beta = 1.0, 25.0
+        A = alpha_blr * np.eye(Phi.shape[1]) + beta * Phi.T @ Phi
+        self.A_inv = np.linalg.inv(A + 1e-6 * np.eye(A.shape[0]))
+
+        # BLR target: residual (y_hf - y_lf_pred)
+        y_lf_for_hf_np = y_lf_for_hf.cpu().numpy().flatten()
+        residual = y_hf_scaled - y_lf_for_hf_np
+        self.m = beta * self.A_inv @ Phi.T @ residual
+        self.beta = beta
+        self.is_fitted = True
+
+    def predict(self, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        if not self.is_fitted:
+            raise ValueError("Model not fitted")
+
+        X_scaled = self.scaler_x.transform(X)
+        X_t = torch.FloatTensor(X_scaled).to(device)
+
+        self.lf_network.eval()
+        self.hf_network.eval()
+        with torch.no_grad():
+            y_lf_pred = self.lf_network(X_t)
+            hf_input = torch.cat([X_t, y_lf_pred], dim=1)
+            Phi = self.hf_network(hf_input).cpu().numpy()
+            y_lf_np = y_lf_pred.cpu().numpy().flatten()
+
+        # BLR prediction: y_hf = y_lf + residual
+        residual_mean = Phi @ self.m
+        mean = y_lf_np + residual_mean
+
+        var = 1/self.beta + np.sum(Phi @ self.A_inv * Phi, axis=1)
+        std = np.sqrt(np.maximum(var, 1e-6))
+
+        mean = self.scaler_y.inverse_transform(mean.reshape(-1, 1)).flatten()
+        std = std * self.scaler_y.scale_[0]
+
+        return mean, std
+
+    def predict_lf(self, X: np.ndarray) -> np.ndarray:
+        """Predict LF values (for debugging/visualization)"""
+        if not self.is_fitted:
+            raise ValueError("Model not fitted")
+
+        X_scaled = self.scaler_x.transform(X)
+        X_t = torch.FloatTensor(X_scaled).to(device)
+
+        self.lf_network.eval()
+        with torch.no_grad():
+            y_lf_pred = self.lf_network(X_t).cpu().numpy().flatten()
+
+        return self.scaler_y.inverse_transform(y_lf_pred.reshape(-1, 1)).flatten()
+
+
 class DNGO_TL(BaseMFModel):
     """
     DNGO with Transfer Learning:
     - Pretrain feature extractor on LF data
     - Fine-tune on HF data
     - BLR on HF features
+    - L2 regularization applied via weight_decay in optimizer
     """
 
     def __init__(self, input_dim: int, hidden_dim: int = 128,
-                 lr: float = 0.01, pretrain_epochs: int = 200, finetune_epochs: int = 100):
+                 lr: float = 0.01, pretrain_epochs: int = 200, finetune_epochs: int = 100,
+                 l2_lambda: float = 1e-3):
         super().__init__(input_dim)
         self.hidden_dim = hidden_dim
         self.lr = lr
         self.pretrain_epochs = pretrain_epochs
         self.finetune_epochs = finetune_epochs
+        self.l2_lambda = l2_lambda  # L2 regularization strength
         self.scaler_x = StandardScaler()
         self.scaler_y_lf = StandardScaler()
         self.scaler_y_hf = StandardScaler()
@@ -377,9 +582,11 @@ class DNGO_TL(BaseMFModel):
         y_lf_t = torch.FloatTensor(y_lf_scaled).to(device)
 
         self.network = self._build_network()
-        optimizer = torch.optim.Adam(self.network.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(
+            self.network.parameters(), lr=self.lr, weight_decay=self.l2_lambda
+        )
 
-        # Pretrain
+        # Pretrain with L2 regularization
         self.network.train()
         for _ in range(self.pretrain_epochs):
             optimizer.zero_grad()
@@ -389,14 +596,16 @@ class DNGO_TL(BaseMFModel):
             loss.backward()
             optimizer.step()
 
-        # Fine-tune on HF
+        # Fine-tune on HF with L2 regularization
         X_hf_scaled = self.scaler_x.transform(X_hf)
         y_hf_scaled = self.scaler_y_hf.fit_transform(y_hf.reshape(-1, 1)).flatten()
 
         X_hf_t = torch.FloatTensor(X_hf_scaled).to(device)
         y_hf_t = torch.FloatTensor(y_hf_scaled).to(device)
 
-        optimizer = torch.optim.Adam(self.network.parameters(), lr=self.lr * 0.1)
+        optimizer = torch.optim.Adam(
+            self.network.parameters(), lr=self.lr * 0.1, weight_decay=self.l2_lambda
+        )
         for _ in range(self.finetune_epochs):
             optimizer.zero_grad()
             features = self.network(X_hf_t)
@@ -410,7 +619,8 @@ class DNGO_TL(BaseMFModel):
         with torch.no_grad():
             Phi = self.network(X_hf_t).cpu().numpy()
 
-        alpha, beta = 0.1, 2.0
+        # BLR parameters - match model_comparison settings
+        alpha, beta = 1.0, 25.0
         A = alpha * np.eye(Phi.shape[1]) + beta * Phi.T @ Phi
         self.A_inv = np.linalg.inv(A + 1e-6 * np.eye(A.shape[0]))
         self.m = beta * self.A_inv @ Phi.T @ y_hf_scaled
@@ -1249,6 +1459,9 @@ MF_MODEL_REGISTRY = {
     # Joint Training (best in model_comparison: R²=0.78)
     'DNGO_Joint': DNGO_Joint,
 
+    # Sequential Training (prevents LF collapse) - RECOMMENDED
+    'DNGO_Sequential': DNGO_Sequential,
+
     # Transfer Learning (pretrain LF, finetune HF)
     'DNGO_TL': DNGO_TL,
     'BNN_TL': BNN_TL,
@@ -1258,7 +1471,7 @@ MF_MODEL_REGISTRY = {
 }
 
 # Note: GP_TL doesn't make sense (GP doesn't have pretrain/finetune)
-# So we have 11 MF models: 6 MFGP + 5 TL
+# Models: 6 MFGP + 1 Joint + 1 Sequential + 5 TL = 13 total
 
 
 def create_mf_model(model_name: str, input_dim: int) -> BaseMFModel:

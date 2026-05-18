@@ -1,0 +1,11 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Polarizability,Dual-BLR,42,0.0,21,53,-1.0,35.205
+Polarizability,Dual-BLR,43,0.0,21,53,-1.0,37.694
+Polarizability,Dual-BLR,44,0.0,21,53,-1.0,37.929
+Polarizability,Dual-BLR,45,0.0,21,53,-1.0,36.202
+Polarizability,Dual-BLR,46,0.0,21,53,-1.0,36.525
+Polarizability,Dual-BLR,47,0.0,21,53,-1.0,34.873
+Polarizability,Dual-BLR,48,0.0,21,53,-1.0,33.774
+Polarizability,Dual-BLR,49,0.0,21,53,-1.0,37.795
+Polarizability,Dual-BLR,50,0.0,21,53,-1.0,15.799
+Polarizability,Dual-BLR,51,0.0,21,53,-1.0,14.946

@@ -1,0 +1,114 @@
+Device: cuda
+================================================================================
+Unified Multi-Fidelity Benchmark Comparison
+================================================================================
+Models: 12 models
+Seeds: 3
+Output: benchmark_results_20260115_054226
+================================================================================
+Created Branin-Fav: 2500 grid points, R²=0.969, ρ=0.1
+Created Branin-Unfav: 2500 grid points, R²=0.580, ρ=0.5
+
+============================================================
+Benchmark: Branin-Fav
+============================================================
+  MFGP, seed=42... Traceback (most recent call last):
+  File "/cephfs/volumes/hpc_data_prj/eng_waste_to_protein/ae035a41-20d2-44f3-aa46-14424ab0f6bf/repositories/MultiFidelity-ProcessOpt/Perovskites/2.Transfer_learning/synthetic_benchmark/benchmark_all.py", line 1309, in <module>
+    main()
+  File "/cephfs/volumes/hpc_data_prj/eng_waste_to_protein/ae035a41-20d2-44f3-aa46-14424ab0f6bf/repositories/MultiFidelity-ProcessOpt/Perovskites/2.Transfer_learning/synthetic_benchmark/benchmark_all.py", line 1282, in main
+    df = run_all_benchmarks(args.n_seeds, args.base_seed)
+  File "/cephfs/volumes/hpc_data_prj/eng_waste_to_protein/ae035a41-20d2-44f3-aa46-14424ab0f6bf/repositories/MultiFidelity-ProcessOpt/Perovskites/2.Transfer_learning/synthetic_benchmark/benchmark_all.py", line 1193, in run_all_benchmarks
+    result = run_bo(benchmark, model_class, budgets[bench_name], seed)
+  File "/cephfs/volumes/hpc_data_prj/eng_waste_to_protein/ae035a41-20d2-44f3-aa46-14424ab0f6bf/repositories/MultiFidelity-ProcessOpt/Perovskites/2.Transfer_learning/synthetic_benchmark/benchmark_all.py", line 1096, in run_bo
+    model.fit(X_lf, y_lf, X_hf, y_hf)
+  File "/cephfs/volumes/hpc_data_prj/eng_waste_to_protein/ae035a41-20d2-44f3-aa46-14424ab0f6bf/repositories/MultiFidelity-ProcessOpt/Perovskites/2.Transfer_learning/synthetic_benchmark/benchmark_all.py", line 159, in fit
+    fit_gpytorch_mll(mll)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/botorch/fit.py", line 105, in fit_gpytorch_mll
+    return FitGPyTorchMLL(
+  File "/users/k23070952/.local/lib/python3.9/site-packages/botorch/utils/dispatcher.py", line 93, in __call__
+    return func(*args, **kwargs)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/botorch/fit.py", line 252, in _fit_fallback
+    optimizer(mll, closure=closure, **optimizer_kwargs)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/botorch/optim/fit.py", line 92, in fit_gpytorch_mll_scipy
+    result = scipy_minimize(
+  File "/users/k23070952/.local/lib/python3.9/site-packages/botorch/optim/core.py", line 109, in scipy_minimize
+    raw = minimize_with_timeout(
+  File "/users/k23070952/.local/lib/python3.9/site-packages/botorch/optim/utils/timeout.py", line 80, in minimize_with_timeout
+    return optimize.minimize(
+  File "/users/k23070952/.local/lib/python3.9/site-packages/scipy/optimize/_minimize.py", line 713, in minimize
+    res = _minimize_lbfgsb(fun, x0, args, jac, bounds,
+  File "/users/k23070952/.local/lib/python3.9/site-packages/scipy/optimize/_lbfgsb_py.py", line 369, in _minimize_lbfgsb
+    f, g = func_and_grad(x)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/scipy/optimize/_differentiable_functions.py", line 296, in fun_and_grad
+    self._update_fun()
+  File "/users/k23070952/.local/lib/python3.9/site-packages/scipy/optimize/_differentiable_functions.py", line 262, in _update_fun
+    self._update_fun_impl()
+  File "/users/k23070952/.local/lib/python3.9/site-packages/scipy/optimize/_differentiable_functions.py", line 163, in update_fun
+    self.f = fun_wrapped(self.x)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/scipy/optimize/_differentiable_functions.py", line 145, in fun_wrapped
+    fx = fun(np.copy(x), *args)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/scipy/optimize/_optimize.py", line 78, in __call__
+    self._compute_if_needed(x, *args)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/scipy/optimize/_optimize.py", line 72, in _compute_if_needed
+    fg = self.fun(x, *args)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/botorch/optim/closures/core.py", line 150, in __call__
+    value_tensor, grad_tensors = self.closure(**kwargs)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/botorch/optim/closures/core.py", line 64, in __call__
+    values = self.forward(**kwargs)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/botorch/optim/closures/model_closures.py", line 176, in closure
+    log_likelihood = mll(
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/module.py", line 31, in __call__
+    outputs = self.forward(*inputs, **kwargs)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/mlls/exact_marginal_log_likelihood.py", line 64, in forward
+    res = output.log_prob(target)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/distributions/multivariate_normal.py", line 171, in log_prob
+    return super().log_prob(value)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/torch/distributions/multivariate_normal.py", line 255, in log_prob
+    M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/distributions/multivariate_normal.py", line 88, in _unbroadcasted_scale_tril
+    ust = to_dense(self.lazy_covariance_matrix.cholesky())
+  File "/users/k23070952/.local/lib/python3.9/site-packages/linear_operator/operators/_linear_operator.py", line 1303, in cholesky
+    chol = self._cholesky(upper=False)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/linear_operator/utils/memoize.py", line 59, in g
+    return _add_to_cache(self, cache_name, method(self, *args, **kwargs), *args, kwargs_pkl=kwargs_pkl)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/linear_operator/operators/_linear_operator.py", line 510, in _cholesky
+    evaluated_kern_mat = self.evaluate_kernel()
+  File "/users/k23070952/.local/lib/python3.9/site-packages/linear_operator/operators/added_diag_linear_operator.py", line 209, in evaluate_kernel
+    added_diag_linear_op = self.representation_tree()(*self.representation())
+  File "/users/k23070952/.local/lib/python3.9/site-packages/linear_operator/operators/_linear_operator.py", line 2064, in representation_tree
+    return LinearOperatorRepresentationTree(self)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/linear_operator/operators/linear_operator_representation_tree.py", line 15, in __init__
+    representation_size = len(arg.representation())
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/lazy/lazy_evaluated_kernel_tensor.py", line 397, in representation
+    return self.evaluate_kernel().representation()
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/utils/memoize.py", line 59, in g
+    return _add_to_cache(self, cache_name, method(self, *args, **kwargs), *args, kwargs_pkl=kwargs_pkl)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/lazy/lazy_evaluated_kernel_tensor.py", line 25, in wrapped
+    output = method(self, *args, **kwargs)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/lazy/lazy_evaluated_kernel_tensor.py", line 355, in evaluate_kernel
+    res = self.kernel(
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/kernels/kernel.py", line 530, in __call__
+    super(Kernel, self).__call__(x1_, x2_, last_dim_is_batch=last_dim_is_batch, **params)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/module.py", line 31, in __call__
+    outputs = self.forward(*inputs, **kwargs)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/kernels/scale_kernel.py", line 109, in forward
+    orig_output = self.base_kernel.forward(x1, x2, diag=diag, last_dim_is_batch=last_dim_is_batch, **params)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/kernels/kernel.py", line 660, in forward
+    res = self.kernels[0](x1, x2, diag=diag, **params)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/kernels/kernel.py", line 530, in __call__
+    super(Kernel, self).__call__(x1_, x2_, last_dim_is_batch=last_dim_is_batch, **params)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/module.py", line 31, in __call__
+    outputs = self.forward(*inputs, **kwargs)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/botorch/models/kernels/linear_truncated_fidelity.py", line 201, in forward
+    covar_unbiased = self.covar_module_unbiased(x1_, x2_, diag=diag)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/kernels/kernel.py", line 530, in __call__
+    super(Kernel, self).__call__(x1_, x2_, last_dim_is_batch=last_dim_is_batch, **params)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/module.py", line 31, in __call__
+    outputs = self.forward(*inputs, **kwargs)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/kernels/matern_kernel.py", line 99, in forward
+    distance = self.covar_dist(x1_, x2_, diag=diag, **params)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/kernels/kernel.py", line 357, in covar_dist
+    return dist_func(x1, x2, x1_eq_x2)
+  File "/users/k23070952/.local/lib/python3.9/site-packages/gpytorch/kernels/kernel.py", line 60, in dist
+    return res.clamp_min_(1e-30).sqrt_()
+KeyboardInterrupt

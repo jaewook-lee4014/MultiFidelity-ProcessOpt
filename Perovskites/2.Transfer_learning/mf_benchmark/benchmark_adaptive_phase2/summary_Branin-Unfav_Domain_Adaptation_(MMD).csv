@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Branin-Unfav,Domain Adaptation (MMD),adaptive,42,0.07480380217855298,35,30,0.47269080217855297,96.233
+Branin-Unfav,Domain Adaptation (MMD),adaptive,43,1.852144194230294,31,38,2.250031194230294,81.618
+Branin-Unfav,Domain Adaptation (MMD),adaptive,44,0.07480380217855298,34,32,0.47269080217855297,75.198
+Branin-Unfav,Domain Adaptation (MMD),adaptive,45,1.5486488092602473,39,22,1.9465358092602472,68.729
+Branin-Unfav,Domain Adaptation (MMD),adaptive,46,5.403141946411699,23,54,5.801028946411699,89.911
+Branin-Unfav,Domain Adaptation (MMD),adaptive,47,0.07480380217855298,23,54,0.47269080217855297,90.418
+Branin-Unfav,Domain Adaptation (MMD),adaptive,48,3.083176413998001,26,48,3.481063413998001,86.749
+Branin-Unfav,Domain Adaptation (MMD),adaptive,49,4.149754619716026,32,36,4.547641619716026,78.252
+Branin-Unfav,Domain Adaptation (MMD),adaptive,50,3.3617148202748792,33,34,3.759601820274879,76.565
+Branin-Unfav,Domain Adaptation (MMD),adaptive,51,0.0972357826887994,42,16,0.4951227826887994,65.149
+Branin-Unfav,Domain Adaptation (MMD),adaptive,52,0.2705594724235735,22,56,0.6684464724235735,92.92
+Branin-Unfav,Domain Adaptation (MMD),adaptive,53,1.7397062505820315,30,40,2.1375932505820314,80.799
+Branin-Unfav,Domain Adaptation (MMD),adaptive,54,1.2634069122796445,36,28,1.6612939122796444,72.047
+Branin-Unfav,Domain Adaptation (MMD),adaptive,55,0.4035566709587507,35,30,0.8014436709587507,71.702
+Branin-Unfav,Domain Adaptation (MMD),adaptive,56,3.3617148202748792,27,46,3.759601820274879,76.205
+Branin-Unfav,Domain Adaptation (MMD),adaptive,57,0.9873388055472007,32,36,1.3852258055472007,65.346
+Branin-Unfav,Domain Adaptation (MMD),adaptive,58,2.078120329843391,29,42,2.476007329843391,65.5
+Branin-Unfav,Domain Adaptation (MMD),adaptive,59,0.8670871380136081,33,34,1.2649741380136081,63.039
+Branin-Unfav,Domain Adaptation (MMD),adaptive,60,1.109003323700228,30,40,1.5068903237002278,61.528
+Branin-Unfav,Domain Adaptation (MMD),adaptive,61,1.1105189550745491,29,42,1.508405955074549,54.1

@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+FreeSolv,Sparse MFGP,adaptive,42,0,38,119,-3.43,4634.359
+FreeSolv,Sparse MFGP,adaptive,43,0,38,119,-3.43,1138.302
+FreeSolv,Sparse MFGP,adaptive,44,0,38,119,-3.43,1120.187
+FreeSolv,Sparse MFGP,adaptive,45,0,39,109,-3.43,1016.844
+FreeSolv,Sparse MFGP,adaptive,46,0,38,119,-3.43,1101.017
+FreeSolv,Sparse MFGP,adaptive,47,0,38,119,-3.43,884.654
+FreeSolv,Sparse MFGP,adaptive,48,0,38,119,-3.43,809.402
+FreeSolv,Sparse MFGP,adaptive,49,0,38,119,-3.43,820.409
+FreeSolv,Sparse MFGP,adaptive,50,0,38,119,-3.43,702.096
+FreeSolv,Sparse MFGP,adaptive,51,0,38,119,-3.43,590.089
+FreeSolv,Sparse MFGP,adaptive,52,0,38,119,-3.43,551.698
+FreeSolv,Sparse MFGP,adaptive,53,0,38,119,-3.43,491.436
+FreeSolv,Sparse MFGP,adaptive,54,0,38,119,-3.43,481.35
+FreeSolv,Sparse MFGP,adaptive,55,0,39,109,-3.43,392.272
+FreeSolv,Sparse MFGP,adaptive,56,0,38,119,-3.43,368.05
+FreeSolv,Sparse MFGP,adaptive,57,0,38,119,-3.43,247.012
+FreeSolv,Sparse MFGP,adaptive,58,0,38,119,-3.43,254.398
+FreeSolv,Sparse MFGP,adaptive,59,0,38,119,-3.43,253.308
+FreeSolv,Sparse MFGP,adaptive,60,0,37,129,-3.43,262.783
+FreeSolv,Sparse MFGP,adaptive,61,0,37,129,-3.43,273.872

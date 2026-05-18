@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Polarizability,Soft Parameter Sharing,adaptive,42,0,22,47,-1.0,37.678
+Polarizability,Soft Parameter Sharing,adaptive,43,0,22,47,-1.0,36.104
+Polarizability,Soft Parameter Sharing,adaptive,44,0,23,41,-1.0,33.062
+Polarizability,Soft Parameter Sharing,adaptive,45,0,22,47,-1.0,36.248
+Polarizability,Soft Parameter Sharing,adaptive,46,0,22,47,-1.0,36.365
+Polarizability,Soft Parameter Sharing,adaptive,47,0,22,47,-1.0,36.23
+Polarizability,Soft Parameter Sharing,adaptive,48,0,22,47,-1.0,36.374
+Polarizability,Soft Parameter Sharing,adaptive,49,0,22,47,-1.0,36.234
+Polarizability,Soft Parameter Sharing,adaptive,50,0,22,47,-1.0,36.264
+Polarizability,Soft Parameter Sharing,adaptive,51,0,23,41,-1.0,33.104
+Polarizability,Soft Parameter Sharing,adaptive,52,0,22,47,-1.0,36.382
+Polarizability,Soft Parameter Sharing,adaptive,53,0,21,53,-1.0,37.79
+Polarizability,Soft Parameter Sharing,adaptive,54,0,22,47,-1.0,34.274
+Polarizability,Soft Parameter Sharing,adaptive,55,0,22,47,-1.0,34.245
+Polarizability,Soft Parameter Sharing,adaptive,56,0,22,47,-1.0,31.461
+Polarizability,Soft Parameter Sharing,adaptive,57,0,22,47,-1.0,28.939
+Polarizability,Soft Parameter Sharing,adaptive,58,0,22,47,-1.0,25.58
+Polarizability,Soft Parameter Sharing,adaptive,59,0,22,47,-1.0,18.409
+Polarizability,Soft Parameter Sharing,adaptive,60,0,22,47,-1.0,16.995
+Polarizability,Soft Parameter Sharing,adaptive,61,0,22,47,-1.0,17.064

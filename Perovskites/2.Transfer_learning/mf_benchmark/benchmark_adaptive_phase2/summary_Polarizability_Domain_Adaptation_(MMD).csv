@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Polarizability,Domain Adaptation (MMD),adaptive,42,0,22,47,-1.0,41.678
+Polarizability,Domain Adaptation (MMD),adaptive,43,0,22,47,-1.0,37.565
+Polarizability,Domain Adaptation (MMD),adaptive,44,0,22,47,-1.0,37.302
+Polarizability,Domain Adaptation (MMD),adaptive,45,0,22,47,-1.0,37.484
+Polarizability,Domain Adaptation (MMD),adaptive,46,0,21,53,-1.0,40.848
+Polarizability,Domain Adaptation (MMD),adaptive,47,0,22,47,-1.0,37.473
+Polarizability,Domain Adaptation (MMD),adaptive,48,0,23,41,-1.0,34.377
+Polarizability,Domain Adaptation (MMD),adaptive,49,0,22,47,-1.0,37.399
+Polarizability,Domain Adaptation (MMD),adaptive,50,0,22,47,-1.0,37.393
+Polarizability,Domain Adaptation (MMD),adaptive,51,0,22,47,-1.0,37.553
+Polarizability,Domain Adaptation (MMD),adaptive,52,0,22,47,-1.0,36.898
+Polarizability,Domain Adaptation (MMD),adaptive,53,0,21,53,-1.0,38.471
+Polarizability,Domain Adaptation (MMD),adaptive,54,0,22,47,-1.0,35.404
+Polarizability,Domain Adaptation (MMD),adaptive,55,0,22,47,-1.0,33.354
+Polarizability,Domain Adaptation (MMD),adaptive,56,0,22,47,-1.0,31.284
+Polarizability,Domain Adaptation (MMD),adaptive,57,0,22,47,-1.0,26.811
+Polarizability,Domain Adaptation (MMD),adaptive,58,0,22,47,-1.0,20.228
+Polarizability,Domain Adaptation (MMD),adaptive,59,0,22,47,-1.0,17.577
+Polarizability,Domain Adaptation (MMD),adaptive,60,0,22,47,-1.0,17.503
+Polarizability,Domain Adaptation (MMD),adaptive,61,0,22,47,-1.0,14.358

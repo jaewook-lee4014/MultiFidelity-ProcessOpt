@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+FreeSolv,DKL Multi-Fidelity,adaptive,42,0,41,89,-3.43,4017.574
+FreeSolv,DKL Multi-Fidelity,adaptive,43,0,41,89,-3.43,572.037
+FreeSolv,DKL Multi-Fidelity,adaptive,44,0,41,89,-3.43,539.245
+FreeSolv,DKL Multi-Fidelity,adaptive,45,0,41,89,-3.43,541.371
+FreeSolv,DKL Multi-Fidelity,adaptive,46,0,40,99,-3.43,580.265
+FreeSolv,DKL Multi-Fidelity,adaptive,47,0,41,89,-3.43,530.742
+FreeSolv,DKL Multi-Fidelity,adaptive,48,0,40,99,-3.43,568.196
+FreeSolv,DKL Multi-Fidelity,adaptive,49,0,40,99,-3.43,584.513
+FreeSolv,DKL Multi-Fidelity,adaptive,50,0,40,99,-3.43,575.782
+FreeSolv,DKL Multi-Fidelity,adaptive,51,0,41,89,-3.43,521.869
+FreeSolv,DKL Multi-Fidelity,adaptive,52,0,41,89,-3.43,462.515
+FreeSolv,DKL Multi-Fidelity,adaptive,53,0,40,99,-3.43,459.593
+FreeSolv,DKL Multi-Fidelity,adaptive,54,0,41,89,-3.43,405.438
+FreeSolv,DKL Multi-Fidelity,adaptive,55,0,40,99,-3.43,452.025
+FreeSolv,DKL Multi-Fidelity,adaptive,56,0,40,99,-3.43,447.002
+FreeSolv,DKL Multi-Fidelity,adaptive,57,0,40,99,-3.43,429.692
+FreeSolv,DKL Multi-Fidelity,adaptive,58,0,40,99,-3.43,395.461
+FreeSolv,DKL Multi-Fidelity,adaptive,59,0,41,89,-3.43,333.481
+FreeSolv,DKL Multi-Fidelity,adaptive,60,0,40,99,-3.43,357.831
+FreeSolv,DKL Multi-Fidelity,adaptive,61,0,41,89,-3.43,327.742

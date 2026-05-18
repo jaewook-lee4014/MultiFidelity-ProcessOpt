@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Branin-Unfav,Knowledge Distillation,adaptive,42,0.07480380217855298,38,24,0.47269080217855297,75.054
+Branin-Unfav,Knowledge Distillation,adaptive,43,4.708197854632693,39,22,5.106084854632693,52.11
+Branin-Unfav,Knowledge Distillation,adaptive,44,0.4035566709587507,33,34,0.8014436709587507,57.073
+Branin-Unfav,Knowledge Distillation,adaptive,45,1.5486488092602473,39,22,1.9465358092602472,50.976
+Branin-Unfav,Knowledge Distillation,adaptive,46,0.723926085363458,24,52,1.121813085363458,66.662
+Branin-Unfav,Knowledge Distillation,adaptive,47,3.083176413998001,40,20,3.481063413998001,50.021
+Branin-Unfav,Knowledge Distillation,adaptive,48,2.556315453628039,27,46,2.9542024536280387,62.703
+Branin-Unfav,Knowledge Distillation,adaptive,49,4.149754619716026,31,38,4.547641619716026,58.549
+Branin-Unfav,Knowledge Distillation,adaptive,50,2.2850247480231056,36,28,2.6829117480231055,54.628
+Branin-Unfav,Knowledge Distillation,adaptive,51,0.3474885137832534,41,18,0.7453755137832534,48.812
+Branin-Unfav,Knowledge Distillation,adaptive,52,0.07480380217855298,28,44,0.47269080217855297,62.193
+Branin-Unfav,Knowledge Distillation,adaptive,53,3.083176413998001,27,46,3.481063413998001,63.518
+Branin-Unfav,Knowledge Distillation,adaptive,54,0.8895739477111658,32,36,1.2874609477111658,58.661
+Branin-Unfav,Knowledge Distillation,adaptive,55,1.4936574826248679,42,16,1.8915444826248677,47.887
+Branin-Unfav,Knowledge Distillation,adaptive,56,0.07480380217855298,32,36,0.47269080217855297,58.357
+Branin-Unfav,Knowledge Distillation,adaptive,57,0.9873388055472007,38,24,1.3852258055472007,52.553
+Branin-Unfav,Knowledge Distillation,adaptive,58,2.3339751976806076,36,28,2.7318621976806075,54.363
+Branin-Unfav,Knowledge Distillation,adaptive,59,0.8670871380136081,31,38,1.2649741380136081,58.299
+Branin-Unfav,Knowledge Distillation,adaptive,60,1.109003323700228,37,26,1.5068903237002278,51.401
+Branin-Unfav,Knowledge Distillation,adaptive,61,4.57687635040767,27,46,4.97476335040767,58.816

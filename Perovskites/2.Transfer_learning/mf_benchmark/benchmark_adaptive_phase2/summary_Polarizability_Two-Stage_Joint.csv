@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Polarizability,Two-Stage Joint,adaptive,42,0,22,47,-1.0,24.857
+Polarizability,Two-Stage Joint,adaptive,43,0,22,47,-1.0,28.891
+Polarizability,Two-Stage Joint,adaptive,44,0,22,47,-1.0,29.163
+Polarizability,Two-Stage Joint,adaptive,45,0,22,47,-1.0,29.082
+Polarizability,Two-Stage Joint,adaptive,46,0,22,47,-1.0,29.139
+Polarizability,Two-Stage Joint,adaptive,47,0,22,47,-1.0,28.895
+Polarizability,Two-Stage Joint,adaptive,48,0,23,41,-1.0,26.621
+Polarizability,Two-Stage Joint,adaptive,49,0,22,47,-1.0,29.055
+Polarizability,Two-Stage Joint,adaptive,50,0,23,41,-1.0,26.456
+Polarizability,Two-Stage Joint,adaptive,51,0,22,47,-1.0,29.03
+Polarizability,Two-Stage Joint,adaptive,52,0,22,47,-1.0,29.226
+Polarizability,Two-Stage Joint,adaptive,53,0,21,53,-1.0,31.612
+Polarizability,Two-Stage Joint,adaptive,54,0,22,47,-1.0,29.027
+Polarizability,Two-Stage Joint,adaptive,55,0,22,47,-1.0,29.235
+Polarizability,Two-Stage Joint,adaptive,56,0,22,47,-1.0,27.897
+Polarizability,Two-Stage Joint,adaptive,57,0,22,47,-1.0,27.475
+Polarizability,Two-Stage Joint,adaptive,58,0,22,47,-1.0,27.601
+Polarizability,Two-Stage Joint,adaptive,59,0,22,47,-1.0,26.775
+Polarizability,Two-Stage Joint,adaptive,60,0,22,47,-1.0,25.266
+Polarizability,Two-Stage Joint,adaptive,61,0,22,47,-1.0,23.916

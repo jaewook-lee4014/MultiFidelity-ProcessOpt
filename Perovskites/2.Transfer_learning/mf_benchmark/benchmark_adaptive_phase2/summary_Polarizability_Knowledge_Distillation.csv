@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Polarizability,Knowledge Distillation,adaptive,42,0,22,47,-1.0,26.447
+Polarizability,Knowledge Distillation,adaptive,43,0,22,47,-1.0,27.662
+Polarizability,Knowledge Distillation,adaptive,44,0,22,47,-1.0,27.656
+Polarizability,Knowledge Distillation,adaptive,45,0,22,47,-1.0,27.736
+Polarizability,Knowledge Distillation,adaptive,46,0,22,47,-1.0,27.821
+Polarizability,Knowledge Distillation,adaptive,47,0,22,47,-1.0,27.616
+Polarizability,Knowledge Distillation,adaptive,48,0,22,47,-1.0,27.868
+Polarizability,Knowledge Distillation,adaptive,49,0,22,47,-1.0,27.691
+Polarizability,Knowledge Distillation,adaptive,50,0,22,47,-1.0,27.678
+Polarizability,Knowledge Distillation,adaptive,51,0,22,47,-1.0,27.948
+Polarizability,Knowledge Distillation,adaptive,52,0,22,47,-1.0,27.993
+Polarizability,Knowledge Distillation,adaptive,53,0,21,53,-1.0,30.101
+Polarizability,Knowledge Distillation,adaptive,54,0,22,47,-1.0,27.912
+Polarizability,Knowledge Distillation,adaptive,55,0,22,47,-1.0,27.895
+Polarizability,Knowledge Distillation,adaptive,56,0,22,47,-1.0,27.21
+Polarizability,Knowledge Distillation,adaptive,57,0,22,47,-1.0,26.042
+Polarizability,Knowledge Distillation,adaptive,58,0,22,47,-1.0,26.489
+Polarizability,Knowledge Distillation,adaptive,59,0,22,47,-1.0,26.21
+Polarizability,Knowledge Distillation,adaptive,60,0,22,47,-1.0,24.529
+Polarizability,Knowledge Distillation,adaptive,61,0,22,47,-1.0,24.213

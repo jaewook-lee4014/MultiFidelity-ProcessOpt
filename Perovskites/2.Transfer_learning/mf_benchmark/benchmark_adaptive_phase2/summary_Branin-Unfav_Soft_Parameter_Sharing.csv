@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Branin-Unfav,Soft Parameter Sharing,adaptive,42,0.4035566709587507,35,30,0.8014436709587507,94.969
+Branin-Unfav,Soft Parameter Sharing,adaptive,43,4.149448226435588,36,28,4.547335226435588,72.697
+Branin-Unfav,Soft Parameter Sharing,adaptive,44,0.009019962044670815,26,48,0.4069069620446708,85.313
+Branin-Unfav,Soft Parameter Sharing,adaptive,45,0.07480380217855298,43,14,0.47269080217855297,63.391
+Branin-Unfav,Soft Parameter Sharing,adaptive,46,4.149448226435588,24,52,4.547335226435588,87.357
+Branin-Unfav,Soft Parameter Sharing,adaptive,47,0.8490659666566377,43,14,1.2469529666566377,62.687
+Branin-Unfav,Soft Parameter Sharing,adaptive,48,2.556315453628039,42,16,2.9542024536280387,64.477
+Branin-Unfav,Soft Parameter Sharing,adaptive,49,3.5701461902941958,35,30,3.9680331902941957,74.284
+Branin-Unfav,Soft Parameter Sharing,adaptive,50,0.49573856355245816,27,46,0.8936255635524581,84.757
+Branin-Unfav,Soft Parameter Sharing,adaptive,51,0.7759110906150174,41,18,1.1737980906150174,66.808
+Branin-Unfav,Soft Parameter Sharing,adaptive,52,0.16005592324075912,30,40,0.5579429232407591,80.514
+Branin-Unfav,Soft Parameter Sharing,adaptive,53,3.1907209297824624,23,54,3.5886079297824622,89.902
+Branin-Unfav,Soft Parameter Sharing,adaptive,54,0.3474885137832534,39,22,0.7453755137832534,68.287
+Branin-Unfav,Soft Parameter Sharing,adaptive,55,0.14546928279938853,34,32,0.5433562827993885,73.083
+Branin-Unfav,Soft Parameter Sharing,adaptive,56,0.07480380217855298,37,26,0.47269080217855297,69.528
+Branin-Unfav,Soft Parameter Sharing,adaptive,57,0.4035566709587507,41,18,0.8014436709587507,58.888
+Branin-Unfav,Soft Parameter Sharing,adaptive,58,6.439448803197238,24,52,6.837335803197238,74.549
+Branin-Unfav,Soft Parameter Sharing,adaptive,59,0.07480380217855298,34,32,0.47269080217855297,59.142
+Branin-Unfav,Soft Parameter Sharing,adaptive,60,3.083176413998001,40,20,3.481063413998001,51.385
+Branin-Unfav,Soft Parameter Sharing,adaptive,61,3.1872150107265744,20,60,3.5851020107265743,71.513

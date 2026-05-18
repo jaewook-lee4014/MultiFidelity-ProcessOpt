@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Polarizability,Sparse MFGP,adaptive,42,0,24,35,-1.0,830.089
+Polarizability,Sparse MFGP,adaptive,43,0,24,35,-1.0,200.672
+Polarizability,Sparse MFGP,adaptive,44,0,23,41,-1.0,222.088
+Polarizability,Sparse MFGP,adaptive,45,0,25,29,-1.0,180.512
+Polarizability,Sparse MFGP,adaptive,46,0,24,35,-1.0,200.742
+Polarizability,Sparse MFGP,adaptive,47,0,24,35,-1.0,201.769
+Polarizability,Sparse MFGP,adaptive,48,0,24,35,-1.0,201.114
+Polarizability,Sparse MFGP,adaptive,49,0,24,35,-1.0,202.429
+Polarizability,Sparse MFGP,adaptive,50,0,24,35,-1.0,199.909
+Polarizability,Sparse MFGP,adaptive,51,0,24,35,-1.0,200.995
+Polarizability,Sparse MFGP,adaptive,52,0,23,41,-1.0,221.128
+Polarizability,Sparse MFGP,adaptive,53,0,24,35,-1.0,171.517
+Polarizability,Sparse MFGP,adaptive,54,0,24,35,-1.0,155.277
+Polarizability,Sparse MFGP,adaptive,55,0,24,35,-1.0,124.073
+Polarizability,Sparse MFGP,adaptive,56,0,24,35,-1.0,124.212
+Polarizability,Sparse MFGP,adaptive,57,0,25,29,-1.0,111.287
+Polarizability,Sparse MFGP,adaptive,58,0,24,35,-1.0,101.26
+Polarizability,Sparse MFGP,adaptive,59,0,24,35,-1.0,94.602
+Polarizability,Sparse MFGP,adaptive,60,0,23,41,-1.0,104.261
+Polarizability,Sparse MFGP,adaptive,61,0,23,41,-1.0,104.306

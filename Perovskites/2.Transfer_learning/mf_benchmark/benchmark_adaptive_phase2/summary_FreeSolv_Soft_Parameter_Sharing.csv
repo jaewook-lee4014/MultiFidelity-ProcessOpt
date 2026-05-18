@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+FreeSolv,Soft Parameter Sharing,adaptive,42,0,22,279,-3.43,327.942
+FreeSolv,Soft Parameter Sharing,adaptive,43,0,23,269,-3.43,314.336
+FreeSolv,Soft Parameter Sharing,adaptive,44,0,21,289,-3.43,329.138
+FreeSolv,Soft Parameter Sharing,adaptive,45,0,23,269,-3.43,282.292
+FreeSolv,Soft Parameter Sharing,adaptive,46,0,23,269,-3.43,231.274
+FreeSolv,Soft Parameter Sharing,adaptive,47,0,21,289,-3.43,213.748
+FreeSolv,Soft Parameter Sharing,adaptive,48,0,21,289,-3.43,182.318
+FreeSolv,Soft Parameter Sharing,adaptive,49,0,24,259,-3.43,162.436
+FreeSolv,Soft Parameter Sharing,adaptive,50,0,23,269,-3.43,168.731
+FreeSolv,Soft Parameter Sharing,adaptive,51,0,22,279,-3.43,174.385
+FreeSolv,Soft Parameter Sharing,adaptive,52,0,20,299,-3.43,186.002
+FreeSolv,Soft Parameter Sharing,adaptive,53,0,21,289,-3.43,181.033
+FreeSolv,Soft Parameter Sharing,adaptive,54,0,22,279,-3.43,167.225
+FreeSolv,Soft Parameter Sharing,adaptive,55,0,20,299,-3.43,177.553
+FreeSolv,Soft Parameter Sharing,adaptive,56,0,21,289,-3.43,167.813
+FreeSolv,Soft Parameter Sharing,adaptive,57,0,21,289,-3.43,145.771
+FreeSolv,Soft Parameter Sharing,adaptive,58,0,23,269,-3.43,114.881
+FreeSolv,Soft Parameter Sharing,adaptive,59,0,21,289,-3.43,88.715
+FreeSolv,Soft Parameter Sharing,adaptive,60,0,22,279,-3.43,87.413
+FreeSolv,Soft Parameter Sharing,adaptive,61,0,21,289,-3.43,90.726

@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+FreeSolv,Knowledge Distillation,adaptive,42,0,22,279,-3.43,253.982
+FreeSolv,Knowledge Distillation,adaptive,43,0,23,269,-3.43,241.583
+FreeSolv,Knowledge Distillation,adaptive,44,0,22,279,-3.43,249.499
+FreeSolv,Knowledge Distillation,adaptive,45,0,23,269,-3.43,235.997
+FreeSolv,Knowledge Distillation,adaptive,46,0,22,279,-3.43,227.388
+FreeSolv,Knowledge Distillation,adaptive,47,0,21,289,-3.43,202.39
+FreeSolv,Knowledge Distillation,adaptive,48,0,23,269,-3.43,164.956
+FreeSolv,Knowledge Distillation,adaptive,49,0,23,269,-3.43,146.075
+FreeSolv,Knowledge Distillation,adaptive,50,0,22,279,-3.43,133.346
+FreeSolv,Knowledge Distillation,adaptive,51,0,21,289,-3.43,138.515
+FreeSolv,Knowledge Distillation,adaptive,52,0,22,279,-3.43,133.594
+FreeSolv,Knowledge Distillation,adaptive,53,0,22,279,-3.43,134.466
+FreeSolv,Knowledge Distillation,adaptive,54,0,23,269,-3.43,129.24
+FreeSolv,Knowledge Distillation,adaptive,55,0,21,289,-3.43,138.373
+FreeSolv,Knowledge Distillation,adaptive,56,0,22,279,-3.43,134.136
+FreeSolv,Knowledge Distillation,adaptive,57,0,21,289,-3.43,137.893
+FreeSolv,Knowledge Distillation,adaptive,58,0,22,279,-3.43,127.292
+FreeSolv,Knowledge Distillation,adaptive,59,0,23,269,-3.43,123.567
+FreeSolv,Knowledge Distillation,adaptive,60,0,22,279,-3.43,127.758
+FreeSolv,Knowledge Distillation,adaptive,61,0,20,299,-3.43,129.749

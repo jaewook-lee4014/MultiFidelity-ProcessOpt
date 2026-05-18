@@ -23,7 +23,7 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Default number of Optuna trials per optimization
-N_OPTUNA_TRIALS = 30  # Balance between thoroughness and speed
+N_OPTUNA_TRIALS = 50  # 50 trials for better generalization
 
 
 # =============================================================================
@@ -55,6 +55,27 @@ def create_dngo_joint_objective(model_class, X_lf, y_lf, X_hf, y_hf, input_dim):
             'lr': trial.suggest_float('lr', 1e-4, 5e-2, log=True),
             'alpha': trial.suggest_float('alpha', 0.05, 0.95),  # HF loss weight
             'epochs': trial.suggest_int('epochs', 100, 500),
+            'l2_lambda': trial.suggest_float('l2_lambda', 1e-5, 1e-2, log=True),
+        }
+
+        score = kfold_cv_score_mf(model_class, X_lf, y_lf, X_hf, y_hf, params, input_dim)
+        return score
+
+    return objective
+
+
+def create_dngo_sequential_objective(model_class, X_lf, y_lf, X_hf, y_hf, input_dim):
+    """DNGO_Sequential objective for Optuna - prevents LF collapse by sequential training"""
+    def objective(trial):
+        params = {
+            'hidden_dim': trial.suggest_categorical('hidden_dim', [32, 64, 128]),
+            'lf_lr': trial.suggest_float('lf_lr', 1e-4, 1e-2, log=True),
+            'hf_lr': trial.suggest_float('hf_lr', 1e-4, 1e-2, log=True),
+            'lf_epochs': trial.suggest_int('lf_epochs', 100, 500),
+            'hf_epochs': trial.suggest_int('hf_epochs', 50, 300),
+            'num_layers': trial.suggest_int('num_layers', 1, 3),
+            'l2_lambda': trial.suggest_float('l2_lambda', 1e-6, 1e-3, log=True),
+            'feature_dim': trial.suggest_categorical('feature_dim', [25, 50, 100]),
         }
 
         score = kfold_cv_score_mf(model_class, X_lf, y_lf, X_hf, y_hf, params, input_dim)
@@ -90,7 +111,7 @@ def create_mcdropout_objective(model_class, X_lf, y_lf, X_hf, y_hf, input_dim):
             'num_layers': trial.suggest_int('num_layers', 1, 4),
             'dropout': trial.suggest_float('dropout', 0.05, 0.5),
             'lr': trial.suggest_float('lr', 1e-4, 1e-1, log=True),
-            'weight_decay': trial.suggest_float('weight_decay', 1e-6, 1e-2, log=True),
+            'l2_lambda': trial.suggest_float('l2_lambda', 1e-6, 1e-2, log=True),
         }
 
         score = kfold_cv_score_mf(model_class, X_lf, y_lf, X_hf, y_hf, params, input_dim)
@@ -108,7 +129,7 @@ def create_deep_ensemble_objective(model_class, X_lf, y_lf, X_hf, y_hf, input_di
             'n_ensemble': trial.suggest_categorical('n_ensemble', [3, 5, 7, 10]),
             'dropout': trial.suggest_float('dropout', 0.0, 0.3),
             'lr': trial.suggest_float('lr', 1e-4, 1e-1, log=True),
-            'weight_decay': trial.suggest_float('weight_decay', 1e-6, 1e-2, log=True),
+            'l2_lambda': trial.suggest_float('l2_lambda', 1e-6, 1e-2, log=True),
         }
 
         score = kfold_cv_score_mf(model_class, X_lf, y_lf, X_hf, y_hf, params, input_dim)
@@ -128,7 +149,7 @@ def create_sngp_objective(model_class, X_lf, y_lf, X_hf, y_hf, input_dim):
             'ridge_penalty': trial.suggest_float('ridge_penalty', 0.1, 10.0, log=True),
             'length_scale': trial.suggest_float('length_scale', 0.1, 5.0),
             'lr': trial.suggest_float('lr', 1e-4, 1e-1, log=True),
-            'weight_decay': trial.suggest_float('weight_decay', 1e-6, 1e-2, log=True),
+            'l2_lambda': trial.suggest_float('l2_lambda', 1e-6, 1e-2, log=True),
         }
 
         score = kfold_cv_score_mf(model_class, X_lf, y_lf, X_hf, y_hf, params, input_dim)
@@ -141,6 +162,7 @@ def create_sngp_objective(model_class, X_lf, y_lf, X_hf, y_hf, input_dim):
 OBJECTIVE_CREATORS = {
     'DNGO': create_dngo_objective,
     'DNGO_Joint': create_dngo_joint_objective,
+    'DNGO_Sequential': create_dngo_sequential_objective,
     'BNN': create_bnn_objective,
     'MCDropout': create_mcdropout_objective,
     'DeepEnsemble': create_deep_ensemble_objective,
@@ -154,6 +176,8 @@ def get_model_type(model_name: str) -> str:
         return 'GP'
     elif model_name == 'DNGO_Joint':
         return 'DNGO_Joint'
+    elif model_name == 'DNGO_Sequential':
+        return 'DNGO_Sequential'
     elif model_name.startswith('DNGO_'):
         return 'DNGO'
     elif model_name.startswith('BNN_'):
@@ -181,36 +205,56 @@ def kfold_cv_score_mf(model_class, X_lf: np.ndarray, y_lf: np.ndarray,
                       X_hf: np.ndarray, y_hf: np.ndarray,
                       hp_config: Dict, input_dim: int, n_folds: int = 5) -> float:
     """
-    Compute 5-fold CV score on HF data for MF model
+    Compute 5-fold CV score with sum of LF and HF MSE for MF model
 
-    For MF models, we do k-fold CV on HF data while keeping all LF data.
-    Much faster than LOOCV (5 models instead of N models).
+    Evaluation metric: LF_MSE + HF_MSE (equal weight, no alpha dependency)
+    This ensures the model must perform well on BOTH fidelities,
+    preventing over-optimization on HF at the expense of LF.
+
+    Both LF and HF data are split into k-folds independently.
     """
     n_hf = len(X_hf)
-    if n_hf < n_folds:
+    n_lf = len(X_lf)
+    if n_hf < n_folds or n_lf < n_folds:
         return float('inf')
 
-    errors = []
-    kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
+    total_errors = []
+    kf_hf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
+    kf_lf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
 
-    for train_idx, test_idx in kf.split(X_hf):
-        X_hf_train = X_hf[train_idx]
-        y_hf_train = y_hf[train_idx]
-        X_hf_test = X_hf[test_idx]
-        y_hf_test = y_hf[test_idx]
+    # Create fold indices for both LF and HF
+    hf_folds = list(kf_hf.split(X_hf))
+    lf_folds = list(kf_lf.split(X_lf))
+
+    for fold_idx in range(n_folds):
+        hf_train_idx, hf_test_idx = hf_folds[fold_idx]
+        lf_train_idx, lf_test_idx = lf_folds[fold_idx]
+
+        X_hf_train, y_hf_train = X_hf[hf_train_idx], y_hf[hf_train_idx]
+        X_hf_test, y_hf_test = X_hf[hf_test_idx], y_hf[hf_test_idx]
+        X_lf_train, y_lf_train = X_lf[lf_train_idx], y_lf[lf_train_idx]
+        X_lf_test, y_lf_test = X_lf[lf_test_idx], y_lf[lf_test_idx]
 
         try:
             # Create model with current HP config
             model = model_class(input_dim, **hp_config)
-            model.fit(X_lf, y_lf, X_hf_train, y_hf_train)
+            model.fit(X_lf_train, y_lf_train, X_hf_train, y_hf_train)
 
-            mean, _ = model.predict(X_hf_test)
-            fold_errors = (mean - y_hf_test) ** 2
-            errors.extend(fold_errors.tolist())
+            # Evaluate on both LF and HF test sets
+            hf_pred, _ = model.predict(X_hf_test)
+            lf_pred, _ = model.predict(X_lf_test)
+
+            hf_mse = np.mean((hf_pred.flatten() - y_hf_test) ** 2)
+            lf_mse = np.mean((lf_pred.flatten() - y_lf_test) ** 2)
+
+            # Sum of MSE (equal importance for both fidelities)
+            # This prevents alpha from biasing towards HF-only optimization
+            total_mse = lf_mse + hf_mse
+            total_errors.append(total_mse)
         except Exception:
-            errors.append(float('inf'))
+            total_errors.append(float('inf'))
 
-    return np.mean(errors)
+    return np.mean(total_errors)
 
 
 def bayesian_optimize_hp(model_class, model_name: str,
@@ -290,16 +334,21 @@ class MFHyperparameterOptimizer:
         defaults = {
             'GP': {},
             'DNGO': {'hidden_dim': 64, 'lr': 0.001, 'blr_alpha': 1.0, 'blr_beta': 25.0},
-            'DNGO_Joint': {'hidden_dim': 64, 'lr': 0.001, 'alpha': 0.2, 'epochs': 300},
+            'DNGO_Joint': {'hidden_dim': 64, 'lr': 0.001, 'alpha': 0.2, 'epochs': 300, 'l2_lambda': 1e-3},
+            'DNGO_Sequential': {
+                'hidden_dim': 64, 'lf_lr': 1e-3, 'hf_lr': 1e-3,
+                'lf_epochs': 300, 'hf_epochs': 200,
+                'num_layers': 2, 'l2_lambda': 1e-3, 'feature_dim': 50
+            },
             'BNN': {'hidden_dim': 64, 'num_layers': 2, 'lr': 0.001, 'kl_weight': 1.0,
                     'prior_pi': 0.5, 'prior_sigma1': 1.0, 'prior_sigma2': 0.002},
             'MCDropout': {'hidden_dim': 64, 'num_layers': 2, 'dropout': 0.1, 'lr': 0.001,
-                          'weight_decay': 1e-4},
+                          'l2_lambda': 1e-3},
             'DeepEnsemble': {'hidden_dim': 64, 'num_layers': 2, 'n_ensemble': 5, 'lr': 0.001,
-                             'dropout': 0.0, 'weight_decay': 1e-4},
+                             'dropout': 0.0, 'l2_lambda': 1e-3},
             'SNGP': {'hidden_dim': 64, 'num_layers': 2, 'num_inducing': 256, 'lr': 0.001,
                      'spectral_norm_bound': 0.95, 'ridge_penalty': 1.0, 'length_scale': 1.0,
-                     'weight_decay': 1e-4},
+                     'l2_lambda': 1e-3},
         }
         return defaults.get(self.model_type, {})
 

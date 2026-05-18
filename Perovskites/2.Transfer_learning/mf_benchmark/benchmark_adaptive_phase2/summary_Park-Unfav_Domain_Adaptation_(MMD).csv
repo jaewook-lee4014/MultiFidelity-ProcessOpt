@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Park-Unfav,Domain Adaptation (MMD),adaptive,42,1.087312731383618e-07,26,48,1.087312731383618e-07,111.29
+Park-Unfav,Domain Adaptation (MMD),adaptive,43,1.087312731383618e-07,22,56,1.087312731383618e-07,93.967
+Park-Unfav,Domain Adaptation (MMD),adaptive,44,1.087312731383618e-07,26,48,1.087312731383618e-07,86.836
+Park-Unfav,Domain Adaptation (MMD),adaptive,45,1.087312731383618e-07,25,50,1.087312731383618e-07,88.872
+Park-Unfav,Domain Adaptation (MMD),adaptive,46,1.087312731383618e-07,24,52,1.087312731383618e-07,90.261
+Park-Unfav,Domain Adaptation (MMD),adaptive,47,1.087312731383618e-07,23,54,1.087312731383618e-07,89.89
+Park-Unfav,Domain Adaptation (MMD),adaptive,48,1.087312731383618e-07,26,48,1.087312731383618e-07,87.154
+Park-Unfav,Domain Adaptation (MMD),adaptive,49,1.087312731383618e-07,25,50,1.087312731383618e-07,89.335
+Park-Unfav,Domain Adaptation (MMD),adaptive,50,1.087312731383618e-07,27,46,1.087312731383618e-07,84.733
+Park-Unfav,Domain Adaptation (MMD),adaptive,51,1.087312731383618e-07,26,48,1.087312731383618e-07,89.549
+Park-Unfav,Domain Adaptation (MMD),adaptive,52,1.087312731383618e-07,23,54,1.087312731383618e-07,93.283
+Park-Unfav,Domain Adaptation (MMD),adaptive,53,1.087312731383618e-07,26,48,1.087312731383618e-07,86.936
+Park-Unfav,Domain Adaptation (MMD),adaptive,54,1.087312731383618e-07,26,48,1.087312731383618e-07,84.759
+Park-Unfav,Domain Adaptation (MMD),adaptive,55,1.087312731383618e-07,20,60,1.087312731383618e-07,92.956
+Park-Unfav,Domain Adaptation (MMD),adaptive,56,1.087312731383618e-07,24,52,1.087312731383618e-07,84.516
+Park-Unfav,Domain Adaptation (MMD),adaptive,57,1.087312731383618e-07,25,50,1.087312731383618e-07,76.396
+Park-Unfav,Domain Adaptation (MMD),adaptive,58,1.087312731383618e-07,25,50,1.087312731383618e-07,75.158
+Park-Unfav,Domain Adaptation (MMD),adaptive,59,1.087312731383618e-07,25,50,1.087312731383618e-07,71.98
+Park-Unfav,Domain Adaptation (MMD),adaptive,60,1.087312731383618e-07,24,52,1.087312731383618e-07,77.078
+Park-Unfav,Domain Adaptation (MMD),adaptive,61,1.087312731383618e-07,27,46,1.087312731383618e-07,69.688

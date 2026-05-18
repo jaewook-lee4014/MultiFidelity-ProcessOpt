@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+COFs,Domain Adaptation (MMD),adaptive,42,0.0,25,76,-18.53448594783226,88.179
+COFs,Domain Adaptation (MMD),adaptive,43,0.36350643408100325,26,61,-18.170979513751256,75.176
+COFs,Domain Adaptation (MMD),adaptive,44,0.0,24,92,-18.53448594783226,112.161
+COFs,Domain Adaptation (MMD),adaptive,45,0.0,25,76,-18.53448594783226,92.707
+COFs,Domain Adaptation (MMD),adaptive,46,0.0,25,76,-18.53448594783226,92.704
+COFs,Domain Adaptation (MMD),adaptive,47,0.0,24,92,-18.53448594783226,112.078
+COFs,Domain Adaptation (MMD),adaptive,48,0.36350643408100325,26,61,-18.170979513751256,75.247
+COFs,Domain Adaptation (MMD),adaptive,49,0.36350643408100325,26,61,-18.170979513751256,74.852
+COFs,Domain Adaptation (MMD),adaptive,50,0.0,25,76,-18.53448594783226,92.635
+COFs,Domain Adaptation (MMD),adaptive,51,0.0,25,76,-18.53448594783226,89.701
+COFs,Domain Adaptation (MMD),adaptive,52,0.0,24,92,-18.53448594783226,108.324
+COFs,Domain Adaptation (MMD),adaptive,53,0.0,25,76,-18.53448594783226,87.986
+COFs,Domain Adaptation (MMD),adaptive,54,0.0,24,92,-18.53448594783226,98.019
+COFs,Domain Adaptation (MMD),adaptive,55,0.0,26,61,-18.53448594783226,63.898
+COFs,Domain Adaptation (MMD),adaptive,56,0.36350643408100325,26,61,-18.170979513751256,61.649
+COFs,Domain Adaptation (MMD),adaptive,57,0.36350643408100325,26,61,-18.170979513751256,57.582
+COFs,Domain Adaptation (MMD),adaptive,58,0.0,25,76,-18.53448594783226,64.173
+COFs,Domain Adaptation (MMD),adaptive,59,0.36350643408100325,26,61,-18.170979513751256,51.527
+COFs,Domain Adaptation (MMD),adaptive,60,0.36350643408100325,26,61,-18.170979513751256,51.442
+COFs,Domain Adaptation (MMD),adaptive,61,0.36350643408100325,26,61,-18.170979513751256,51.625

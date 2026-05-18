@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Polarizability,DKL Multi-Fidelity,adaptive,42,0,23,41,-1.0,768.161
+Polarizability,DKL Multi-Fidelity,adaptive,43,0,22,47,-1.0,168.422
+Polarizability,DKL Multi-Fidelity,adaptive,44,0,23,41,-1.0,153.516
+Polarizability,DKL Multi-Fidelity,adaptive,45,0,22,47,-1.0,170.1
+Polarizability,DKL Multi-Fidelity,adaptive,46,0,23,41,-1.0,154.813
+Polarizability,DKL Multi-Fidelity,adaptive,47,0,22,47,-1.0,167.747
+Polarizability,DKL Multi-Fidelity,adaptive,48,0,23,41,-1.0,154.154
+Polarizability,DKL Multi-Fidelity,adaptive,49,0,22,47,-1.0,167.012
+Polarizability,DKL Multi-Fidelity,adaptive,50,0,22,47,-1.0,169.044
+Polarizability,DKL Multi-Fidelity,adaptive,51,0,22,47,-1.0,169.707
+Polarizability,DKL Multi-Fidelity,adaptive,52,0,22,47,-1.0,167.481
+Polarizability,DKL Multi-Fidelity,adaptive,53,0,22,47,-1.0,167.803
+Polarizability,DKL Multi-Fidelity,adaptive,54,0,23,41,-1.0,153.366
+Polarizability,DKL Multi-Fidelity,adaptive,55,0,23,41,-1.0,152.618
+Polarizability,DKL Multi-Fidelity,adaptive,56,0,22,47,-1.0,139.686
+Polarizability,DKL Multi-Fidelity,adaptive,57,0,22,47,-1.0,127.67
+Polarizability,DKL Multi-Fidelity,adaptive,58,0,22,47,-1.0,112.984
+Polarizability,DKL Multi-Fidelity,adaptive,59,0,22,47,-1.0,106.849
+Polarizability,DKL Multi-Fidelity,adaptive,60,0,22,47,-1.0,106.792
+Polarizability,DKL Multi-Fidelity,adaptive,61,0,23,41,-1.0,97.528

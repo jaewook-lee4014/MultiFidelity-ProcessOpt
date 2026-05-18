@@ -55,6 +55,10 @@ from synthetic_functions import (
     branin_hf, branin_lf, park_hf, park_lf,
     SCENARIOS, FUNCTIONS
 )
+from baselines import (
+    SparseMFGP, NARGP, DKLMultiFidelity,
+    run_successive_halving, run_hf_random_search, run_lf_screening,
+)
 
 
 # =============================================================================
@@ -1040,10 +1044,11 @@ def run_bo(benchmark, model_class, budget, seed=42, device=None, sampling_method
 
     regrets = [max(0, y_hf.min() - benchmark.f_star)]
     budgets = [current_budget]
+    step_records = []
 
     iteration = 0
     max_iter = 500
-    use_ei = (model_class == MFGP)
+    use_ei = model_class in (MFGP, SparseMFGP, NARGP, DKLMultiFidelity)
 
     while current_budget < budget and iteration < max_iter:
         iteration += 1
@@ -1064,6 +1069,8 @@ def run_bo(benchmark, model_class, budget, seed=42, device=None, sampling_method
         else:
             break
 
+        t0 = time.time()
+        next_idx = None
         try:
             model = model_class(benchmark.X.shape[1], device=device)
             model.fit(X_lf, y_lf, X_hf, y_hf)
@@ -1097,8 +1104,23 @@ def run_bo(benchmark, model_class, budget, seed=42, device=None, sampling_method
                     y_lf = benchmark.evaluate_lf(np.array(list(lf_indices)))
             current_budget += cost
 
+        wall_time = time.time() - t0
         regrets.append(max(0, y_hf.min() - benchmark.f_star))
         budgets.append(current_budget)
+
+        # Observed value for this step
+        if next_idx is not None:
+            observed = benchmark.evaluate_hf(np.array([next_idx]))[0] if eval_hf else benchmark.evaluate_lf(np.array([next_idx]))[0]
+        else:
+            observed = np.nan
+        step_records.append({
+            'step': iteration,
+            'fidelity': 1 if eval_hf else 0,
+            'candidate_idx': int(next_idx) if next_idx is not None else -1,
+            'observed_value': observed,
+            'best_hf_so_far': y_hf.min(),
+            'wall_time_sec': round(wall_time, 4),
+        })
 
     return {
         'regrets': regrets,
@@ -1106,7 +1128,8 @@ def run_bo(benchmark, model_class, budget, seed=42, device=None, sampling_method
         'final_regret': regrets[-1],
         'n_hf': len(hf_indices),
         'n_lf': len(lf_indices),
-        'best_y': y_hf.min()
+        'best_y': y_hf.min(),
+        'step_records': step_records,
     }
 
 
@@ -1159,10 +1182,21 @@ def run_combination(args):
     results_trajectory = []
     start_time = time.time()
 
+    is_successive_halving = (model_name == 'Successive Halving')
+    is_hf_random = (model_name == 'HF-Only Random')
+    is_lf_screening = (model_name == 'LF-Screening')
+
     for i, seed in enumerate(seeds):
         seed_start = time.time()
         try:
-            result = run_bo(benchmark, model_class, budget, seed, device, sampling_method)
+            if is_hf_random:
+                result = run_hf_random_search(benchmark, budget, seed)
+            elif is_lf_screening:
+                result = run_lf_screening(benchmark, budget, seed)
+            elif is_successive_halving:
+                result = run_successive_halving(benchmark, budget, seed)
+            else:
+                result = run_bo(benchmark, model_class, budget, seed, device, sampling_method)
             seed_elapsed = time.time() - seed_start
 
             # Summary data (one row per seed)
@@ -1186,6 +1220,12 @@ def run_combination(args):
                     'budget': round(b, 2),
                     'regret': r,
                 })
+
+            # Per-baseline CSV with step records
+            if result.get('step_records'):
+                df_steps = pd.DataFrame(result['step_records'])
+                step_file = output_dir / f'results_{model_name.replace(" ", "_")}_{bench_name}_{seed}.csv'
+                df_steps.to_csv(step_file, index=False)
 
         except Exception as e:
             seed_elapsed = time.time() - seed_start
@@ -1306,6 +1346,12 @@ def main():
         'Soft Parameter Sharing': SoftParameterSharing,
         'Pseudo-Labeling': PseudoLabeling,
         'Adapter': Adapter,
+        'Sparse MFGP': SparseMFGP,
+        'NARGP': NARGP,
+        'DKL Multi-Fidelity': DKLMultiFidelity,
+        'Successive Halving': None,  # handled separately in run_combination
+        'HF-Only Random': None,     # handled separately in run_combination
+        'LF-Screening': None,       # handled separately in run_combination
     }
 
     seeds = [args.base_seed + i for i in range(args.n_seeds)]
@@ -1324,7 +1370,7 @@ def main():
     total_combinations = len(tasks)
     total_runs = total_combinations * args.n_seeds
 
-    print(f"Combinations: {total_combinations} (7 benchmarks × 12 models)")
+    print(f"Combinations: {total_combinations} (7 benchmarks × {len(models)} models)")
     print(f"Total runs: {total_runs}")
     print("=" * 80)
 

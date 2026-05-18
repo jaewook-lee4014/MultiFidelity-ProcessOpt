@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Park-Unfav,Soft Parameter Sharing,adaptive,42,1.087312731383618e-07,26,48,1.087312731383618e-07,108.566
+Park-Unfav,Soft Parameter Sharing,adaptive,43,1.087312731383618e-07,27,46,1.087312731383618e-07,85.55
+Park-Unfav,Soft Parameter Sharing,adaptive,44,1.087312731383618e-07,26,48,1.087312731383618e-07,87.494
+Park-Unfav,Soft Parameter Sharing,adaptive,45,1.087312731383618e-07,27,46,1.087312731383618e-07,85.522
+Park-Unfav,Soft Parameter Sharing,adaptive,46,1.087312731383618e-07,26,48,1.087312731383618e-07,85.439
+Park-Unfav,Soft Parameter Sharing,adaptive,47,1.087312731383618e-07,22,56,1.087312731383618e-07,94.375
+Park-Unfav,Soft Parameter Sharing,adaptive,48,1.087312731383618e-07,25,50,1.087312731383618e-07,88.234
+Park-Unfav,Soft Parameter Sharing,adaptive,49,1.087312731383618e-07,25,50,1.087312731383618e-07,88.109
+Park-Unfav,Soft Parameter Sharing,adaptive,50,1.087312731383618e-07,26,48,1.087312731383618e-07,88.284
+Park-Unfav,Soft Parameter Sharing,adaptive,51,1.087312731383618e-07,25,50,1.087312731383618e-07,87.504
+Park-Unfav,Soft Parameter Sharing,adaptive,52,1.087312731383618e-07,23,54,1.087312731383618e-07,87.901
+Park-Unfav,Soft Parameter Sharing,adaptive,53,1.087312731383618e-07,24,52,1.087312731383618e-07,89.355
+Park-Unfav,Soft Parameter Sharing,adaptive,54,1.087312731383618e-07,26,48,1.087312731383618e-07,88.729
+Park-Unfav,Soft Parameter Sharing,adaptive,55,1.087312731383618e-07,19,62,1.087312731383618e-07,90.863
+Park-Unfav,Soft Parameter Sharing,adaptive,56,1.087312731383618e-07,20,60,1.087312731383618e-07,87.437
+Park-Unfav,Soft Parameter Sharing,adaptive,57,1.087312731383618e-07,27,46,1.087312731383618e-07,75.763
+Park-Unfav,Soft Parameter Sharing,adaptive,58,1.087312731383618e-07,24,52,1.087312731383618e-07,77.943
+Park-Unfav,Soft Parameter Sharing,adaptive,59,1.087312731383618e-07,25,50,1.087312731383618e-07,78.114
+Park-Unfav,Soft Parameter Sharing,adaptive,60,1.087312731383618e-07,25,50,1.087312731383618e-07,79.609
+Park-Unfav,Soft Parameter Sharing,adaptive,61,1.087312731383618e-07,26,48,1.087312731383618e-07,76.282

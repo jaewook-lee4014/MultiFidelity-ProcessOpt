@@ -1,0 +1,11 @@
+benchmark,model,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+FreeSolv,Dual-BLR,42,0.0,40,92,-3.43,84.109
+FreeSolv,Dual-BLR,43,0.0,40,92,-3.43,82.924
+FreeSolv,Dual-BLR,44,0.0,40,92,-3.43,82.594
+FreeSolv,Dual-BLR,45,0.0,40,92,-3.43,83.638
+FreeSolv,Dual-BLR,46,0.0,40,92,-3.43,78.392
+FreeSolv,Dual-BLR,47,0.0,40,92,-3.43,79.25
+FreeSolv,Dual-BLR,48,0.0,40,92,-3.43,81.76
+FreeSolv,Dual-BLR,49,0.0,40,92,-3.43,77.479
+FreeSolv,Dual-BLR,50,0.0,40,92,-3.43,78.927
+FreeSolv,Dual-BLR,51,0.0,40,92,-3.43,80.196

@@ -22,6 +22,8 @@ import json
 import pickle
 from scipy.stats import norm
 from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing
 
 # Local imports
 from synthetic_functions_mfbo import branin_hf, branin_lf, SCENARIOS, FUNCTIONS
@@ -31,7 +33,7 @@ from mf_hyperparameter_optimization import (
 )
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+print(device)
 
 def expected_improvement(mean: np.ndarray, std: np.ndarray,
                          y_best: float, xi: float = 0.01) -> np.ndarray:
@@ -68,11 +70,15 @@ def run_mf_bo_with_step_tracking(seed: int, model_name: str, scenario_name: str,
     f_star = FUNCTIONS['Branin-2D']['f_star']
 
     dim = 2
-    n_init_lf = 5
-    n_init_hf = 2
-
     cost_hf = 1.0
     cost_lf = rho
+
+    # Initial samples based on cost ratio (LF:HF = 1/rho : 1)
+    # FAVORABLE (rho=0.1): LF:HF = 10:1, so 10 LF per 1 HF
+    # UNFAVORABLE (rho=0.5): LF:HF = 2:1, so 2 LF per 1 HF
+    lf_hf_ratio = int(1.0 / rho)
+    n_init_hf = 2
+    n_init_lf = n_init_hf * lf_hf_ratio  # FAVORABLE: 20, UNFAVORABLE: 4
 
     # Create evaluation grid (for plotting)
     n_grid = 100
@@ -122,18 +128,28 @@ def run_mf_bo_with_step_tracking(seed: int, model_name: str, scenario_name: str,
     max_iterations = 200
     iteration = 0
 
+    # Cost-based fidelity selection ratio
+    # For every 1 HF evaluation, do (1/rho) LF evaluations
+    # FAVORABLE (rho=0.1): 10 LF per 1 HF
+    # UNFAVORABLE (rho=0.5): 2 LF per 1 HF
+    lf_per_hf = max(1, int(1.0 / rho))
+    lf_counter = 0  # Track LF evaluations since last HF
+
     while current_budget < total_budget and iteration < max_iterations:
         iteration += 1
 
         remaining = total_budget - current_budget
 
         if remaining >= cost_hf:
-            if remaining >= cost_lf and iteration % 2 == 0:
+            # Cost-based fidelity selection
+            if remaining >= cost_lf and lf_counter < lf_per_hf:
                 eval_hf = False
                 cost = cost_lf
+                lf_counter += 1
             else:
                 eval_hf = True
                 cost = cost_hf
+                lf_counter = 0  # Reset counter after HF evaluation
         elif remaining >= cost_lf:
             eval_hf = False
             cost = cost_lf
@@ -371,8 +387,8 @@ def visualize_1d_cross_section(results: dict, model_name: str, scenario_name: st
 
     n_steps = len(valid_steps)
 
-    # Select steps to show
-    n_show = min(n_steps, 5)
+    # Select steps to show (same as 2D: max 6)
+    n_show = min(n_steps, 6)
     if n_steps > n_show:
         indices = np.linspace(0, n_steps - 1, n_show, dtype=int)
         selected_steps = [valid_steps[i] for i in indices]
@@ -388,7 +404,7 @@ def visualize_1d_cross_section(results: dict, model_name: str, scenario_name: st
     y_lf_cross = y_lf_true[:, x2_idx]
 
     # Create figure
-    fig, axes = plt.subplots(len(selected_steps), 1, figsize=(14, 4 * len(selected_steps)))
+    fig, axes = plt.subplots(len(selected_steps), 1, figsize=(14, 3.5 * len(selected_steps)))
     if len(selected_steps) == 1:
         axes = [axes]
 
@@ -444,13 +460,33 @@ def visualize_1d_cross_section(results: dict, model_name: str, scenario_name: st
                        s=80, marker='^', edgecolors='darkblue', linewidths=1,
                        label=f'Train LF ({len(X_lf)})', zorder=5)
 
-        # Calculate RMSE on cross-section
-        rmse = np.sqrt(np.mean((mean_cross - y_hf_cross)**2))
-        r2 = 1 - np.sum((y_hf_cross - mean_cross)**2) / np.sum((y_hf_cross - np.mean(y_hf_cross))**2)
+        # Calculate R² metrics
+        # 1. 2D full grid R² (Test set - entire grid vs True HF)
+        mean_grid_flat = mean_grid.flatten()
+        y_hf_true_flat = y_hf_true.flatten()
+        y_lf_true_flat = y_lf_true.flatten()
+
+        r2_2d_hf = 1 - np.sum((y_hf_true_flat - mean_grid_flat)**2) / np.sum((y_hf_true_flat - np.mean(y_hf_true_flat))**2)
+        r2_2d_lf = 1 - np.sum((y_lf_true_flat - mean_grid_flat)**2) / np.sum((y_lf_true_flat - np.mean(y_lf_true_flat))**2)
+
+        # 2. Train set R² (predictions at training points)
+        # Need to get predictions at training points from the grid (nearest neighbor interpolation)
+        def get_grid_predictions(X_points, mean_grid, n_grid=100):
+            """Get predictions from grid for given points"""
+            idx_x1 = np.clip((X_points[:, 0] * (n_grid - 1)).astype(int), 0, n_grid - 1)
+            idx_x2 = np.clip((X_points[:, 1] * (n_grid - 1)).astype(int), 0, n_grid - 1)
+            return mean_grid[idx_x1, idx_x2]
+
+        pred_hf_train = get_grid_predictions(X_hf, mean_grid)
+        pred_lf_train = get_grid_predictions(X_lf, mean_grid)
+
+        r2_train_hf = 1 - np.sum((y_hf - pred_hf_train)**2) / np.sum((y_hf - np.mean(y_hf))**2) if len(y_hf) > 1 else 0
+        r2_train_lf = 1 - np.sum((y_lf - pred_lf_train)**2) / np.sum((y_lf - np.mean(y_lf))**2) if len(y_lf) > 1 else 0
 
         ax.set_ylabel('f(x)', fontsize=11)
-        ax.set_title(f'Step {step_num} | Budget={budget:.1f} | Regret={regret:.4f} | '
-                     f'Cross-section RMSE={rmse:.3f}, R²={r2:.3f}', fontsize=11)
+        ax.set_title(f'Step {step_num} | Budget={budget:.1f} | Regret={regret:.4f}\n'
+                     f'Train R²: HF={r2_train_hf:.3f}, LF={r2_train_lf:.3f} | '
+                     f'Test R² (2D): HF={r2_2d_hf:.3f}, LF={r2_2d_lf:.3f}', fontsize=10)
         ax.legend(loc='upper right', fontsize=9)
         ax.grid(True, alpha=0.3)
 
@@ -502,22 +538,65 @@ def visualize_regret_curve(all_results: dict, output_dir: Path):
     print(f"  Saved: regret_comparison.png")
 
 
+def run_single_task(args_tuple):
+    """Wrapper function for parallel execution (must be picklable)"""
+    seed, model_name, scenario_name, total_budget, save_interval = args_tuple
+
+    # Set device for this process
+    import torch
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    print(f"  [START] {model_name} | {scenario_name}")
+
+    try:
+        results = run_mf_bo_with_step_tracking(
+            seed=seed,
+            model_name=model_name,
+            scenario_name=scenario_name,
+            total_budget=total_budget,
+            save_interval=save_interval
+        )
+
+        final_step = results['step_data'][-1]
+        print(f"  [DONE] {model_name} | {scenario_name} | "
+              f"Regret={final_step['regret']:.4f}, HF={len(final_step['X_hf'])}")
+
+        return model_name, scenario_name, results
+
+    except Exception as e:
+        print(f"  [ERROR] {model_name} | {scenario_name}: {e}")
+        import traceback
+        traceback.print_exc()
+        return model_name, scenario_name, None
+
+
 def main():
     parser = argparse.ArgumentParser(description='MF BO Step Visualization')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--budget', type=float, default=50, help='Total budget')
     parser.add_argument('--save-interval', type=int, default=5,
                         help='Save predictions every N steps')
+    parser.add_argument('--models', type=str, default='GP_MFGP,DNGO_Joint,DNGO_Sequential',
+                        help='Comma-separated list of models (e.g., DNGO_Joint or GP_MFGP,DNGO_Joint,DNGO_Sequential)')
+    parser.add_argument('--scenarios', type=str, default='favorable,unfavorable',
+                        help='Comma-separated list of scenarios (e.g., favorable or favorable,unfavorable)')
+    parser.add_argument('--parallel', action='store_true',
+                        help='Enable parallel execution')
+    parser.add_argument('--workers', type=int, default=None,
+                        help='Number of parallel workers (default: CPU count)')
     args = parser.parse_args()
 
     # Models and scenarios
-    models = ['GP_MFGP', 'DNGO_Joint']
-    scenarios = ['favorable', 'unfavorable']
+    models = [m.strip() for m in args.models.split(',')]
+    scenarios = [s.strip() for s in args.scenarios.split(',')]
 
     # Output directory
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     output_dir = Path(f'viz_mf_bo_steps_{timestamp}')
     output_dir.mkdir(exist_ok=True)
+
+    # Determine number of workers
+    n_workers = args.workers if args.workers else min(multiprocessing.cpu_count(), len(models) * len(scenarios))
 
     print("=" * 60)
     print("MF BO Step-by-Step Visualization")
@@ -527,37 +606,77 @@ def main():
     print(f"Save interval: {args.save_interval}")
     print(f"Models: {models}")
     print(f"Scenarios: {scenarios}")
+    print(f"Parallel: {args.parallel} (workers: {n_workers})")
     print(f"Output: {output_dir}")
     print("=" * 60)
 
     all_results = {}
 
-    for model_name in models:
-        for scenario_name in scenarios:
-            print(f"\n--- {model_name} | {scenario_name} ---")
+    if args.parallel:
+        # ========== PARALLEL EXECUTION ==========
+        print(f"\nRunning {len(models) * len(scenarios)} tasks in parallel...")
 
-            # Run BO with step tracking
-            results = run_mf_bo_with_step_tracking(
-                seed=args.seed,
-                model_name=model_name,
-                scenario_name=scenario_name,
-                total_budget=args.budget,
-                save_interval=args.save_interval
-            )
+        # Create task list
+        tasks = [
+            (args.seed, model_name, scenario_name, args.budget, args.save_interval)
+            for model_name in models
+            for scenario_name in scenarios
+        ]
 
-            all_results[f"{model_name}_{scenario_name}"] = results
+        # Use 'spawn' method for CUDA compatibility
+        ctx = multiprocessing.get_context('spawn')
 
-            # 2D contour plots
+        # Run in parallel using ProcessPoolExecutor
+        with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as executor:
+            futures = {executor.submit(run_single_task, task): task for task in tasks}
+
+            for future in as_completed(futures):
+                model_name, scenario_name, results = future.result()
+                if results is not None:
+                    all_results[f"{model_name}_{scenario_name}"] = results
+
+        # Generate visualizations after all tasks complete
+        print("\nGenerating visualizations...")
+        for key, results in all_results.items():
+            model_name, scenario_name = key.rsplit('_', 1)
+            # Handle case where model name contains underscore
+            for m in models:
+                for s in scenarios:
+                    if key == f"{m}_{s}":
+                        model_name, scenario_name = m, s
+                        break
+
             visualize_all_steps(results, model_name, scenario_name, output_dir)
-
-            # 1D cross-section plots
             visualize_1d_cross_section(results, model_name, scenario_name, output_dir)
 
-            # Print summary
-            final_step = results['step_data'][-1]
-            print(f"  Final: Budget={final_step['budget']:.1f}, "
-                  f"Regret={final_step['regret']:.4f}, "
-                  f"LF={len(final_step['X_lf'])}, HF={len(final_step['X_hf'])}")
+    else:
+        # ========== SEQUENTIAL EXECUTION ==========
+        for model_name in models:
+            for scenario_name in scenarios:
+                print(f"\n--- {model_name} | {scenario_name} ---")
+
+                # Run BO with step tracking
+                results = run_mf_bo_with_step_tracking(
+                    seed=args.seed,
+                    model_name=model_name,
+                    scenario_name=scenario_name,
+                    total_budget=args.budget,
+                    save_interval=args.save_interval
+                )
+
+                all_results[f"{model_name}_{scenario_name}"] = results
+
+                # 2D contour plots
+                visualize_all_steps(results, model_name, scenario_name, output_dir)
+
+                # 1D cross-section plots
+                visualize_1d_cross_section(results, model_name, scenario_name, output_dir)
+
+                # Print summary
+                final_step = results['step_data'][-1]
+                print(f"  Final: Budget={final_step['budget']:.1f}, "
+                      f"Regret={final_step['regret']:.4f}, "
+                      f"LF={len(final_step['X_lf'])}, HF={len(final_step['X_hf'])}")
 
     # Regret comparison
     visualize_regret_curve(all_results, output_dir)

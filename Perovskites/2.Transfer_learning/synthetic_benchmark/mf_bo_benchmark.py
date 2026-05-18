@@ -39,6 +39,10 @@ from typing import Callable, Tuple, List, Dict
 from scipy.stats import norm
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 import multiprocessing as mp
+import matplotlib.pyplot as plt
+import matplotlib
+
+matplotlib.use('Agg')  # Use non-GUI backend
 
 # Local imports
 from synthetic_functions_mfbo import (
@@ -109,13 +113,17 @@ def compute_prediction_metrics(model, X: np.ndarray, y_true: np.ndarray) -> Dict
 def run_mf_bo_single(seed: int, f_hf: Callable, f_lf: Callable,
                      model_name: str, bounds: np.ndarray, f_star: float,
                      alpha: float, rho: float,
-                     n_init_lf: int = 5, n_init_hf: int = 2,
+                     n_init_hf: int = 2,
                      total_budget: float = TOTAL_BUDGET,
                      hp_optimize_interval: int = HP_OPTIMIZE_INTERVAL,
                      n_test: int = 200) -> Dict:
     """
     Run single MF BO experiment with online HP optimization
     Now also tracks prediction accuracy metrics (R², MSE, MAE) on train and test data
+
+    Initial LF samples are determined by cost ratio: n_init_lf = n_init_hf * (1/rho)
+    - FAVORABLE (rho=0.1): n_init_lf = 2 * 10 = 20
+    - UNFAVORABLE (rho=0.5): n_init_lf = 2 * 2 = 4
     """
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -127,11 +135,16 @@ def run_mf_bo_single(seed: int, f_hf: Callable, f_lf: Callable,
     cost_hf = 1.0
     cost_lf = rho
 
-    # Generate fixed test set (HF values only, for fair comparison)
+    # Initial samples based on cost ratio (LF:HF = 1/rho : 1)
+    lf_hf_ratio = int(1.0 / rho)
+    n_init_lf = n_init_hf * lf_hf_ratio
+
+    # Generate fixed test set for both LF and HF (for fair comparison)
     # Use different seed range to avoid overlap with training data
     np.random.seed(seed + 10000)
     X_test = np.random.uniform(0, 1, (n_test, dim))
-    y_test = f_hf(X_test).flatten()
+    y_test_hf = f_hf(X_test).flatten()  # HF test targets
+    y_test_lf = f_lf(X_test, alpha).flatten()  # LF test targets
     np.random.seed(seed)  # Reset seed for reproducibility
 
     # Initial cost
@@ -148,9 +161,13 @@ def run_mf_bo_single(seed: int, f_hf: Callable, f_lf: Callable,
     budget_history = [current_budget]
     regret_history = [max(0, y_hf.min() - f_star)]
 
-    # Track prediction metrics over budget
-    train_metrics_history = []  # Metrics on HF training data
-    test_metrics_history = []   # Metrics on held-out test data
+    # Track prediction metrics over budget (separate LF and HF)
+    # HF metrics
+    train_hf_metrics_history = []  # Metrics on HF training data
+    test_hf_metrics_history = []   # Metrics on held-out HF test data
+    # LF metrics
+    train_lf_metrics_history = []  # Metrics on LF training data
+    test_lf_metrics_history = []   # Metrics on held-out LF test data
 
     # HP optimizer
     hp_optimizer = MFHyperparameterOptimizer(
@@ -158,11 +175,22 @@ def run_mf_bo_single(seed: int, f_hf: Callable, f_lf: Callable,
     )
     model_class = get_model_class(model_name)
 
+    # Initial HP optimization BEFORE BO loop (ensures generalization from the start)
+    if hp_optimizer.model_type != 'GP':
+        hp_optimizer.optimize(model_class, X_lf, y_lf, X_hf, y_hf)
+
     # BO loop
     max_iterations = 500
     iteration = 0
     last_hp_optimize_n = 0
     model = None  # Keep track of last model for metrics
+
+    # Cost-based fidelity selection ratio
+    # For every 1 HF evaluation, do (1/rho) LF evaluations
+    # FAVORABLE (rho=0.1): 10 LF per 1 HF
+    # UNFAVORABLE (rho=0.5): 2 LF per 1 HF
+    lf_per_hf = max(1, int(1.0 / rho))
+    lf_counter = 0  # Track LF evaluations since last HF
 
     while current_budget < total_budget and iteration < max_iterations:
         iteration += 1
@@ -170,12 +198,15 @@ def run_mf_bo_single(seed: int, f_hf: Callable, f_lf: Callable,
         remaining = total_budget - current_budget
 
         if remaining >= cost_hf:
-            if remaining >= cost_lf and iteration % 2 == 0:
+            # Cost-based fidelity selection
+            if remaining >= cost_lf and lf_counter < lf_per_hf:
                 eval_hf = False
                 cost = cost_lf
+                lf_counter += 1
             else:
                 eval_hf = True
                 cost = cost_hf
+                lf_counter = 0  # Reset counter after HF evaluation
         elif remaining >= cost_lf:
             eval_hf = False
             cost = cost_lf
@@ -197,11 +228,17 @@ def run_mf_bo_single(seed: int, f_hf: Callable, f_lf: Callable,
 
             model.fit(X_lf, y_lf, X_hf, y_hf)
 
-            # Compute prediction metrics on train (HF) and test data
-            train_metrics = compute_prediction_metrics(model, X_hf, y_hf)
-            test_metrics = compute_prediction_metrics(model, X_test, y_test)
-            train_metrics_history.append(train_metrics)
-            test_metrics_history.append(test_metrics)
+            # Compute prediction metrics on train and test data (both LF and HF)
+            # HF metrics
+            train_hf_metrics = compute_prediction_metrics(model, X_hf, y_hf)
+            test_hf_metrics = compute_prediction_metrics(model, X_test, y_test_hf)
+            train_hf_metrics_history.append(train_hf_metrics)
+            test_hf_metrics_history.append(test_hf_metrics)
+            # LF metrics
+            train_lf_metrics = compute_prediction_metrics(model, X_lf, y_lf)
+            test_lf_metrics = compute_prediction_metrics(model, X_test, y_test_lf)
+            train_lf_metrics_history.append(train_lf_metrics)
+            test_lf_metrics_history.append(test_lf_metrics)
 
             X_cand = np.random.uniform(0, 1, (n_candidates, dim))
             mean, std = model.predict(X_cand)
@@ -216,8 +253,10 @@ def run_mf_bo_single(seed: int, f_hf: Callable, f_lf: Callable,
             x_new = np.random.uniform(0, 1, (1, dim))
             # Record NaN metrics on failure
             nan_metrics = {'r2': float('nan'), 'mse': float('nan'), 'mae': float('nan'), 'mean_std': float('nan')}
-            train_metrics_history.append(nan_metrics)
-            test_metrics_history.append(nan_metrics)
+            train_hf_metrics_history.append(nan_metrics)
+            test_hf_metrics_history.append(nan_metrics)
+            train_lf_metrics_history.append(nan_metrics)
+            test_lf_metrics_history.append(nan_metrics)
 
         if eval_hf:
             y_new = f_hf(x_new).flatten()
@@ -232,9 +271,11 @@ def run_mf_bo_single(seed: int, f_hf: Callable, f_lf: Callable,
         budget_history.append(current_budget)
         regret_history.append(max(0, y_hf.min() - f_star))
 
-    # Extract final metrics
-    final_train_metrics = train_metrics_history[-1] if train_metrics_history else {}
-    final_test_metrics = test_metrics_history[-1] if test_metrics_history else {}
+    # Extract final metrics (separate LF and HF)
+    final_train_hf_metrics = train_hf_metrics_history[-1] if train_hf_metrics_history else {}
+    final_test_hf_metrics = test_hf_metrics_history[-1] if test_hf_metrics_history else {}
+    final_train_lf_metrics = train_lf_metrics_history[-1] if train_lf_metrics_history else {}
+    final_test_lf_metrics = test_lf_metrics_history[-1] if test_lf_metrics_history else {}
 
     return {
         'seed': seed,
@@ -245,11 +286,16 @@ def run_mf_bo_single(seed: int, f_hf: Callable, f_lf: Callable,
         'n_hf': len(X_hf),
         'total_cost': current_budget,
         'hp_summary': hp_optimizer.get_summary(),
-        # New: prediction metrics history
-        'train_metrics_history': train_metrics_history,
-        'test_metrics_history': test_metrics_history,
-        'final_train_metrics': final_train_metrics,
-        'final_test_metrics': final_test_metrics
+        # Prediction metrics history (separate LF and HF)
+        'train_hf_metrics_history': train_hf_metrics_history,
+        'test_hf_metrics_history': test_hf_metrics_history,
+        'train_lf_metrics_history': train_lf_metrics_history,
+        'test_lf_metrics_history': test_lf_metrics_history,
+        # Final metrics
+        'final_train_hf_metrics': final_train_hf_metrics,
+        'final_test_hf_metrics': final_test_hf_metrics,
+        'final_train_lf_metrics': final_train_lf_metrics,
+        'final_test_lf_metrics': final_test_lf_metrics
     }
 
 
@@ -354,21 +400,33 @@ def run_single_model_scenario(args):
             'uncertainty_std': np.nanstd(all_std, axis=0).tolist(),
         }
 
-    train_metrics_agg = aggregate_metrics_history(results, 'train_metrics_history', budget_points)
-    test_metrics_agg = aggregate_metrics_history(results, 'test_metrics_history', budget_points)
+    # Aggregate metrics history (separate LF and HF)
+    train_hf_metrics_agg = aggregate_metrics_history(results, 'train_hf_metrics_history', budget_points)
+    test_hf_metrics_agg = aggregate_metrics_history(results, 'test_hf_metrics_history', budget_points)
+    train_lf_metrics_agg = aggregate_metrics_history(results, 'train_lf_metrics_history', budget_points)
+    test_lf_metrics_agg = aggregate_metrics_history(results, 'test_lf_metrics_history', budget_points)
 
-    # Final metrics (averaged across seeds)
-    final_train_r2 = np.nanmean([r['final_train_metrics'].get('r2', np.nan) for r in results])
-    final_train_mse = np.nanmean([r['final_train_metrics'].get('mse', np.nan) for r in results])
-    final_train_mae = np.nanmean([r['final_train_metrics'].get('mae', np.nan) for r in results])
+    # Final HF metrics (averaged across seeds)
+    final_train_hf_r2 = np.nanmean([r['final_train_hf_metrics'].get('r2', np.nan) for r in results])
+    final_train_hf_mse = np.nanmean([r['final_train_hf_metrics'].get('mse', np.nan) for r in results])
+    final_train_hf_mae = np.nanmean([r['final_train_hf_metrics'].get('mae', np.nan) for r in results])
+    final_test_hf_r2 = np.nanmean([r['final_test_hf_metrics'].get('r2', np.nan) for r in results])
+    final_test_hf_mse = np.nanmean([r['final_test_hf_metrics'].get('mse', np.nan) for r in results])
+    final_test_hf_mae = np.nanmean([r['final_test_hf_metrics'].get('mae', np.nan) for r in results])
 
-    final_test_r2 = np.nanmean([r['final_test_metrics'].get('r2', np.nan) for r in results])
-    final_test_mse = np.nanmean([r['final_test_metrics'].get('mse', np.nan) for r in results])
-    final_test_mae = np.nanmean([r['final_test_metrics'].get('mae', np.nan) for r in results])
+    # Final LF metrics (averaged across seeds)
+    final_train_lf_r2 = np.nanmean([r['final_train_lf_metrics'].get('r2', np.nan) for r in results])
+    final_train_lf_mse = np.nanmean([r['final_train_lf_metrics'].get('mse', np.nan) for r in results])
+    final_train_lf_mae = np.nanmean([r['final_train_lf_metrics'].get('mae', np.nan) for r in results])
+    final_test_lf_r2 = np.nanmean([r['final_test_lf_metrics'].get('r2', np.nan) for r in results])
+    final_test_lf_mse = np.nanmean([r['final_test_lf_metrics'].get('mse', np.nan) for r in results])
+    final_test_lf_mae = np.nanmean([r['final_test_lf_metrics'].get('mae', np.nan) for r in results])
 
     # Std of final metrics
-    final_train_r2_std = np.nanstd([r['final_train_metrics'].get('r2', np.nan) for r in results])
-    final_test_r2_std = np.nanstd([r['final_test_metrics'].get('r2', np.nan) for r in results])
+    final_train_hf_r2_std = np.nanstd([r['final_train_hf_metrics'].get('r2', np.nan) for r in results])
+    final_test_hf_r2_std = np.nanstd([r['final_test_hf_metrics'].get('r2', np.nan) for r in results])
+    final_train_lf_r2_std = np.nanstd([r['final_train_lf_metrics'].get('r2', np.nan) for r in results])
+    final_test_lf_r2_std = np.nanstd([r['final_test_lf_metrics'].get('r2', np.nan) for r in results])
 
     return {
         'model_name': model_name,
@@ -384,18 +442,206 @@ def run_single_model_scenario(args):
         'alpha': alpha,
         'rho': rho,
         'hp_summaries': hp_summaries,
-        # New: prediction metrics
-        'train_metrics': train_metrics_agg,
-        'test_metrics': test_metrics_agg,
-        'final_train_r2': float(final_train_r2),
-        'final_train_mse': float(final_train_mse),
-        'final_train_mae': float(final_train_mae),
-        'final_train_r2_std': float(final_train_r2_std),
-        'final_test_r2': float(final_test_r2),
-        'final_test_mse': float(final_test_mse),
-        'final_test_mae': float(final_test_mae),
-        'final_test_r2_std': float(final_test_r2_std),
+        # Prediction metrics - HF
+        'train_hf_metrics': train_hf_metrics_agg,
+        'test_hf_metrics': test_hf_metrics_agg,
+        'final_train_hf_r2': float(final_train_hf_r2),
+        'final_train_hf_mse': float(final_train_hf_mse),
+        'final_train_hf_mae': float(final_train_hf_mae),
+        'final_train_hf_r2_std': float(final_train_hf_r2_std),
+        'final_test_hf_r2': float(final_test_hf_r2),
+        'final_test_hf_mse': float(final_test_hf_mse),
+        'final_test_hf_mae': float(final_test_hf_mae),
+        'final_test_hf_r2_std': float(final_test_hf_r2_std),
+        # Prediction metrics - LF
+        'train_lf_metrics': train_lf_metrics_agg,
+        'test_lf_metrics': test_lf_metrics_agg,
+        'final_train_lf_r2': float(final_train_lf_r2),
+        'final_train_lf_mse': float(final_train_lf_mse),
+        'final_train_lf_mae': float(final_train_lf_mae),
+        'final_train_lf_r2_std': float(final_train_lf_r2_std),
+        'final_test_lf_r2': float(final_test_lf_r2),
+        'final_test_lf_mse': float(final_test_lf_mse),
+        'final_test_lf_mae': float(final_test_lf_mae),
+        'final_test_lf_r2_std': float(final_test_lf_r2_std),
     }
+
+
+def plot_lf_hf_metrics(all_results: Dict, results_dir: Path):
+    """
+    Generate visualization plots for LF/HF metrics
+
+    Creates:
+    1. R² comparison bar chart (Train/Test × LF/HF)
+    2. R² over budget (line plot)
+    3. MSE comparison
+    """
+    colors = {'GP_MFGP': '#1f77b4', 'DNGO_Joint': '#ff7f0e', 'DNGO_TL': '#2ca02c'}
+
+    for scenario_name, scenario_results in all_results.items():
+        if not scenario_results:
+            continue
+
+        models = list(scenario_results.keys())
+        n_models = len(models)
+
+        # ============================================================
+        # Figure 1: R² Bar Chart (Train/Test × LF/HF)
+        # ============================================================
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+        fig.suptitle(f'{scenario_name.upper()} Scenario - R² Comparison', fontsize=14)
+
+        # HF metrics
+        ax = axes[0]
+        x = np.arange(n_models)
+        width = 0.35
+
+        train_hf_r2 = [scenario_results[m].get('final_train_hf_r2', float('nan')) for m in models]
+        test_hf_r2 = [scenario_results[m].get('final_test_hf_r2', float('nan')) for m in models]
+        train_hf_std = [scenario_results[m].get('final_train_hf_r2_std', 0) for m in models]
+        test_hf_std = [scenario_results[m].get('final_test_hf_r2_std', 0) for m in models]
+
+        bars1 = ax.bar(x - width/2, train_hf_r2, width, label='Train HF',
+                       yerr=train_hf_std, capsize=3, color='#2ca02c', alpha=0.8)
+        bars2 = ax.bar(x + width/2, test_hf_r2, width, label='Test HF',
+                       yerr=test_hf_std, capsize=3, color='#d62728', alpha=0.8)
+
+        ax.set_ylabel('R²')
+        ax.set_title('High-Fidelity (HF) Performance')
+        ax.set_xticks(x)
+        ax.set_xticklabels(models, rotation=15)
+        ax.legend()
+        ax.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+        ax.set_ylim(min(-0.5, min(min(train_hf_r2), min(test_hf_r2)) - 0.1), 1.1)
+
+        # Add value labels
+        for bars in [bars1, bars2]:
+            for bar in bars:
+                height = bar.get_height()
+                if not np.isnan(height):
+                    ax.annotate(f'{height:.2f}',
+                              xy=(bar.get_x() + bar.get_width()/2, height),
+                              xytext=(0, 3), textcoords='offset points',
+                              ha='center', va='bottom', fontsize=8)
+
+        # LF metrics
+        ax = axes[1]
+        train_lf_r2 = [scenario_results[m].get('final_train_lf_r2', float('nan')) for m in models]
+        test_lf_r2 = [scenario_results[m].get('final_test_lf_r2', float('nan')) for m in models]
+        train_lf_std = [scenario_results[m].get('final_train_lf_r2_std', 0) for m in models]
+        test_lf_std = [scenario_results[m].get('final_test_lf_r2_std', 0) for m in models]
+
+        bars1 = ax.bar(x - width/2, train_lf_r2, width, label='Train LF',
+                       yerr=train_lf_std, capsize=3, color='#17becf', alpha=0.8)
+        bars2 = ax.bar(x + width/2, test_lf_r2, width, label='Test LF',
+                       yerr=test_lf_std, capsize=3, color='#9467bd', alpha=0.8)
+
+        ax.set_ylabel('R²')
+        ax.set_title('Low-Fidelity (LF) Performance')
+        ax.set_xticks(x)
+        ax.set_xticklabels(models, rotation=15)
+        ax.legend()
+        ax.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+        ax.set_ylim(min(-0.5, min(min(train_lf_r2), min(test_lf_r2)) - 0.1), 1.1)
+
+        # Add value labels
+        for bars in [bars1, bars2]:
+            for bar in bars:
+                height = bar.get_height()
+                if not np.isnan(height):
+                    ax.annotate(f'{height:.2f}',
+                              xy=(bar.get_x() + bar.get_width()/2, height),
+                              xytext=(0, 3), textcoords='offset points',
+                              ha='center', va='bottom', fontsize=8)
+
+        plt.tight_layout()
+        plt.savefig(results_dir / f'metrics_r2_{scenario_name}.png', dpi=150, bbox_inches='tight')
+        plt.close()
+
+        # ============================================================
+        # Figure 2: R² over Budget (Line Plot)
+        # ============================================================
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        fig.suptitle(f'{scenario_name.upper()} Scenario - R² Over Budget', fontsize=14)
+
+        metric_configs = [
+            ('train_hf_metrics', 'Train HF R²', axes[0, 0]),
+            ('test_hf_metrics', 'Test HF R²', axes[0, 1]),
+            ('train_lf_metrics', 'Train LF R²', axes[1, 0]),
+            ('test_lf_metrics', 'Test LF R²', axes[1, 1]),
+        ]
+
+        for metric_key, title, ax in metric_configs:
+            for model_name, result in scenario_results.items():
+                metrics = result.get(metric_key, {})
+                if not metrics or 'budget' not in metrics:
+                    continue
+
+                budget = metrics['budget']
+                r2_mean = metrics.get('r2_mean', [])
+                r2_std = metrics.get('r2_std', [])
+
+                if not r2_mean:
+                    continue
+
+                color = colors.get(model_name, '#333333')
+                ax.plot(budget, r2_mean, '-', label=model_name, color=color, linewidth=2)
+                if r2_std:
+                    ax.fill_between(budget,
+                                   np.array(r2_mean) - np.array(r2_std),
+                                   np.array(r2_mean) + np.array(r2_std),
+                                   alpha=0.2, color=color)
+
+            ax.set_xlabel('Budget')
+            ax.set_ylabel('R²')
+            ax.set_title(title)
+            ax.legend()
+            ax.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+            ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig(results_dir / f'metrics_r2_over_budget_{scenario_name}.png', dpi=150, bbox_inches='tight')
+        plt.close()
+
+        # ============================================================
+        # Figure 3: MSE Comparison
+        # ============================================================
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        fig.suptitle(f'{scenario_name.upper()} Scenario - MSE Comparison', fontsize=14)
+
+        # HF MSE
+        ax = axes[0]
+        train_hf_mse = [scenario_results[m].get('final_train_hf_mse', float('nan')) for m in models]
+        test_hf_mse = [scenario_results[m].get('final_test_hf_mse', float('nan')) for m in models]
+
+        bars1 = ax.bar(x - width/2, train_hf_mse, width, label='Train HF', color='#2ca02c', alpha=0.8)
+        bars2 = ax.bar(x + width/2, test_hf_mse, width, label='Test HF', color='#d62728', alpha=0.8)
+
+        ax.set_ylabel('MSE')
+        ax.set_title('High-Fidelity (HF) MSE')
+        ax.set_xticks(x)
+        ax.set_xticklabels(models, rotation=15)
+        ax.legend()
+
+        # LF MSE
+        ax = axes[1]
+        train_lf_mse = [scenario_results[m].get('final_train_lf_mse', float('nan')) for m in models]
+        test_lf_mse = [scenario_results[m].get('final_test_lf_mse', float('nan')) for m in models]
+
+        bars1 = ax.bar(x - width/2, train_lf_mse, width, label='Train LF', color='#17becf', alpha=0.8)
+        bars2 = ax.bar(x + width/2, test_lf_mse, width, label='Test LF', color='#9467bd', alpha=0.8)
+
+        ax.set_ylabel('MSE')
+        ax.set_title('Low-Fidelity (LF) MSE')
+        ax.set_xticks(x)
+        ax.set_xticklabels(models, rotation=15)
+        ax.legend()
+
+        plt.tight_layout()
+        plt.savefig(results_dir / f'metrics_mse_{scenario_name}.png', dpi=150, bbox_inches='tight')
+        plt.close()
+
+    print(f"  Visualizations saved to {results_dir}")
 
 
 def main():
@@ -530,47 +776,61 @@ def main():
         json.dump(all_results, f, indent=2)
 
     # Summary
-    print("\n" + "=" * 100)
+    print("\n" + "=" * 120)
     print("FINAL SUMMARY")
-    print("=" * 100)
+    print("=" * 120)
 
     for scenario_name, scenario_results in all_results.items():
         if not scenario_results:
             continue
 
         print(f"\n{scenario_name.upper()} (ρ={SCENARIOS[scenario_name]['rho']}, α={SCENARIOS[scenario_name]['alpha_branin']}):")
-        print("-" * 100)
-        print(f"{'Model':<20} {'Regret':>10} {'Train R²':>10} {'Test R²':>10} {'Test MSE':>10} {'Test MAE':>10} {'LF#':>6} {'HF#':>6}")
-        print("-" * 100)
+        print("-" * 120)
+        print(f"{'Model':<18} {'Regret':>8} {'HF TrainR²':>10} {'HF TestR²':>10} {'LF TrainR²':>10} {'LF TestR²':>10} {'HF MSE':>8} {'LF MSE':>8} {'LF#':>5} {'HF#':>5}")
+        print("-" * 120)
 
         sorted_models = sorted(scenario_results.items(), key=lambda x: x[1]['final_regret_mean'])
         for model_name, result in sorted_models:
-            print(f"{model_name:<20} {result['final_regret_mean']:>10.4f} "
-                  f"{result.get('final_train_r2', float('nan')):>10.4f} "
-                  f"{result.get('final_test_r2', float('nan')):>10.4f} "
-                  f"{result.get('final_test_mse', float('nan')):>10.4f} "
-                  f"{result.get('final_test_mae', float('nan')):>10.4f} "
-                  f"{result['n_lf_avg']:>6.1f} {result['n_hf_avg']:>6.1f}")
+            print(f"{model_name:<18} {result['final_regret_mean']:>8.4f} "
+                  f"{result.get('final_train_hf_r2', float('nan')):>10.4f} "
+                  f"{result.get('final_test_hf_r2', float('nan')):>10.4f} "
+                  f"{result.get('final_train_lf_r2', float('nan')):>10.4f} "
+                  f"{result.get('final_test_lf_r2', float('nan')):>10.4f} "
+                  f"{result.get('final_test_hf_mse', float('nan')):>8.4f} "
+                  f"{result.get('final_test_lf_mse', float('nan')):>8.4f} "
+                  f"{result['n_lf_avg']:>5.1f} {result['n_hf_avg']:>5.1f}")
 
-    # CSV summary (extended with prediction metrics)
+    # CSV summary (extended with LF/HF prediction metrics)
     with open(results_dir / "summary.csv", "w") as f:
         f.write("scenario,model,alpha,rho,mean_regret,std_regret,"
-                "train_r2,train_r2_std,train_mse,train_mae,"
-                "test_r2,test_r2_std,test_mse,test_mae,"
+                "train_hf_r2,train_hf_r2_std,train_hf_mse,train_hf_mae,"
+                "test_hf_r2,test_hf_r2_std,test_hf_mse,test_hf_mae,"
+                "train_lf_r2,train_lf_r2_std,train_lf_mse,train_lf_mae,"
+                "test_lf_r2,test_lf_r2_std,test_lf_mse,test_lf_mae,"
                 "n_lf,n_hf\n")
         for scenario_name, scenario_results in all_results.items():
             for model_name, result in scenario_results.items():
                 f.write(f"{scenario_name},{model_name},"
                         f"{result['alpha']},{result['rho']},"
                         f"{result['final_regret_mean']:.6f},{result['final_regret_std']:.6f},"
-                        f"{result.get('final_train_r2', float('nan')):.6f},"
-                        f"{result.get('final_train_r2_std', float('nan')):.6f},"
-                        f"{result.get('final_train_mse', float('nan')):.6f},"
-                        f"{result.get('final_train_mae', float('nan')):.6f},"
-                        f"{result.get('final_test_r2', float('nan')):.6f},"
-                        f"{result.get('final_test_r2_std', float('nan')):.6f},"
-                        f"{result.get('final_test_mse', float('nan')):.6f},"
-                        f"{result.get('final_test_mae', float('nan')):.6f},"
+                        # HF metrics
+                        f"{result.get('final_train_hf_r2', float('nan')):.6f},"
+                        f"{result.get('final_train_hf_r2_std', float('nan')):.6f},"
+                        f"{result.get('final_train_hf_mse', float('nan')):.6f},"
+                        f"{result.get('final_train_hf_mae', float('nan')):.6f},"
+                        f"{result.get('final_test_hf_r2', float('nan')):.6f},"
+                        f"{result.get('final_test_hf_r2_std', float('nan')):.6f},"
+                        f"{result.get('final_test_hf_mse', float('nan')):.6f},"
+                        f"{result.get('final_test_hf_mae', float('nan')):.6f},"
+                        # LF metrics
+                        f"{result.get('final_train_lf_r2', float('nan')):.6f},"
+                        f"{result.get('final_train_lf_r2_std', float('nan')):.6f},"
+                        f"{result.get('final_train_lf_mse', float('nan')):.6f},"
+                        f"{result.get('final_train_lf_mae', float('nan')):.6f},"
+                        f"{result.get('final_test_lf_r2', float('nan')):.6f},"
+                        f"{result.get('final_test_lf_r2_std', float('nan')):.6f},"
+                        f"{result.get('final_test_lf_mse', float('nan')):.6f},"
+                        f"{result.get('final_test_lf_mae', float('nan')):.6f},"
                         f"{result['n_lf_avg']:.1f},{result['n_hf_avg']:.1f}\n")
 
     # Save HP optimization results
@@ -584,10 +844,14 @@ def main():
     with open(results_dir / "hp_optimization.json", "w") as f:
         json.dump(hp_results, f, indent=2)
 
+    # Generate visualizations
+    plot_lf_hf_metrics(all_results, results_dir)
+
     print(f"\nResults saved to: {results_dir}")
     print(f"  - results.json: Full results")
     print(f"  - summary.csv: Summary table")
     print(f"  - hp_optimization.json: HP optimization history")
+    print(f"  - metrics_*.png: Visualization plots")
     print(f"Total time: {datetime.now() - start_time}")
 
 

@@ -1,0 +1,303 @@
+nohup: ignoring input
+Device: cuda
+================================================================================
+Multi-Fidelity Benchmark (NO BLR)
+MFGP: EI | Others: argmin(mean)
+================================================================================
+Models: 12 models
+Seeds: 10
+Output: benchmark_no_blr_20260115_055151
+================================================================================
+Created Branin-Fav: 2500 grid points, R²=0.969, ρ=0.1
+Created Branin-Unfav: 2500 grid points, R²=0.580, ρ=0.5
+
+============================================================
+Benchmark: Branin-Fav
+============================================================
+  MFGP, seed=42... regret=0.1455
+  MFGP, seed=43... regret=0.0066
+  MFGP, seed=44... regret=0.0066
+  MFGP, seed=45... regret=0.6923
+  MFGP, seed=46... regret=0.5595
+  MFGP, seed=47... regret=0.4617
+  MFGP, seed=48... regret=0.1916
+  MFGP, seed=49... regret=0.1916
+  MFGP, seed=50... regret=0.3868
+  MFGP, seed=51... regret=0.0748
+  Sequential, seed=42... regret=0.9056
+  Sequential, seed=43... regret=0.0066
+  Sequential, seed=44... regret=1.2868
+  Sequential, seed=45... regret=0.4957
+  Sequential, seed=46... regret=0.7759
+  Sequential, seed=47... regret=0.0972
+  Sequential, seed=48... regret=0.3876
+  Sequential, seed=49... regret=0.3475
+  Sequential, seed=50... regret=0.3876
+  Sequential, seed=51... regret=1.1105
+  Progressive, seed=42... regret=0.3475
+  Progressive, seed=43... regret=0.5631
+  Progressive, seed=44... regret=0.9997
+  Progressive, seed=45... regret=0.0090
+  Progressive, seed=46... regret=1.2713
+  Progressive, seed=47... regret=0.7014
+  Progressive, seed=48... regret=1.5486
+  Progressive, seed=49... regret=0.1601
+  Progressive, seed=50... regret=1.5486
+  Progressive, seed=51... regret=0.0090
+  Curriculum, seed=42... regret=0.4680
+  Curriculum, seed=43... regret=0.3475
+  Curriculum, seed=44... regret=0.0524
+  Curriculum, seed=45... regret=0.1455
+  Curriculum, seed=46... regret=0.0066
+  Curriculum, seed=47... regret=0.4957
+  Curriculum, seed=48... regret=0.6688
+  Curriculum, seed=49... regret=1.8107
+  Curriculum, seed=50... regret=1.9207
+  Curriculum, seed=51... regret=0.4680
+  Two-Stage Joint, seed=42... regret=1.5486
+  Two-Stage Joint, seed=43... regret=0.3753
+  Two-Stage Joint, seed=44... regret=0.3753
+  Two-Stage Joint, seed=45... regret=0.4144
+  Two-Stage Joint, seed=46... regret=0.5631
+  Two-Stage Joint, seed=47... regret=1.5923
+  Two-Stage Joint, seed=48... regret=0.3753
+  Two-Stage Joint, seed=49... regret=1.0610
+  Two-Stage Joint, seed=50... regret=0.3475
+  Two-Stage Joint, seed=51... regret=0.0972
+  DNGO-Joint, seed=42... regret=0.5631
+  DNGO-Joint, seed=43... regret=0.3753
+  DNGO-Joint, seed=44... regret=0.0748
+  DNGO-Joint, seed=45... regret=0.0090
+  DNGO-Joint, seed=46... regret=0.1916
+  DNGO-Joint, seed=47... regret=0.1034
+  DNGO-Joint, seed=48... regret=0.4680
+  DNGO-Joint, seed=49... regret=0.2832
+  DNGO-Joint, seed=50... regret=0.0972
+  DNGO-Joint, seed=51... regret=0.3753
+  DNGO-Gradient, seed=42... regret=0.1455
+  DNGO-Gradient, seed=43... regret=0.3475
+  DNGO-Gradient, seed=44... regret=0.4846
+  DNGO-Gradient, seed=45... regret=0.4957
+  DNGO-Gradient, seed=46... regret=0.0748
+  DNGO-Gradient, seed=47... regret=0.4036
+  DNGO-Gradient, seed=48... regret=0.4680
+  DNGO-Gradient, seed=49... regret=0.7759
+  DNGO-Gradient, seed=50... regret=0.0066
+  DNGO-Gradient, seed=51... regret=0.5685
+  Knowledge Distillation, seed=42... regret=0.4680
+  Knowledge Distillation, seed=43... regret=0.2370
+  Knowledge Distillation, seed=44... regret=0.0090
+  Knowledge Distillation, seed=45... regret=0.4617
+  Knowledge Distillation, seed=46... regret=1.9207
+  Knowledge Distillation, seed=47... regret=0.2370
+  Knowledge Distillation, seed=48... regret=0.1034
+  Knowledge Distillation, seed=49... regret=0.1601
+  Knowledge Distillation, seed=50... regret=0.2706
+  Knowledge Distillation, seed=51... regret=1.1105
+  Domain Adaptation (MMD), seed=42... regret=0.1531
+  Domain Adaptation (MMD), seed=43... regret=0.5631
+  Domain Adaptation (MMD), seed=44... regret=0.4680
+  Domain Adaptation (MMD), seed=45... regret=0.3475
+  Domain Adaptation (MMD), seed=46... regret=0.6214
+  Domain Adaptation (MMD), seed=47... regret=0.0748
+  Domain Adaptation (MMD), seed=48... regret=0.1034
+  Domain Adaptation (MMD), seed=49... regret=0.0066
+  Domain Adaptation (MMD), seed=50... regret=0.3876
+  Domain Adaptation (MMD), seed=51... regret=0.2706
+  Soft Parameter Sharing, seed=42... regret=0.0066
+  Soft Parameter Sharing, seed=43... regret=0.0972
+  Soft Parameter Sharing, seed=44... regret=0.5631
+  Soft Parameter Sharing, seed=45... regret=0.7759
+  Soft Parameter Sharing, seed=46... regret=0.6923
+  Soft Parameter Sharing, seed=47... regret=1.2868
+  Soft Parameter Sharing, seed=48... regret=0.1034
+  Soft Parameter Sharing, seed=49... regret=0.4144
+  Soft Parameter Sharing, seed=50... regret=1.9797
+  Soft Parameter Sharing, seed=51... regret=0.1455
+  Pseudo-Labeling, seed=42... regret=0.3876
+  Pseudo-Labeling, seed=43... regret=0.2370
+  Pseudo-Labeling, seed=44... regret=1.7098
+  Pseudo-Labeling, seed=45... regret=0.0066
+  Pseudo-Labeling, seed=46... regret=1.2713
+  Pseudo-Labeling, seed=47... regret=0.0972
+  Pseudo-Labeling, seed=48... regret=0.0066
+  Pseudo-Labeling, seed=49... regret=0.4957
+  Pseudo-Labeling, seed=50... regret=0.4680
+  Pseudo-Labeling, seed=51... regret=0.0972
+  Adapter, seed=42... regret=0.2706
+  Adapter, seed=43... regret=0.8592
+  Adapter, seed=44... regret=0.6655
+  Adapter, seed=45... regret=0.6214
+  Adapter, seed=46... regret=0.2370
+  Adapter, seed=47... regret=1.2868
+  Adapter, seed=48... regret=0.3753
+  Adapter, seed=49... regret=2.3024
+  Adapter, seed=50... regret=0.0748
+  Adapter, seed=51... regret=0.3876
+
+============================================================
+Benchmark: Branin-Unfav
+============================================================
+  MFGP, seed=42... regret=0.1531
+  MFGP, seed=43... regret=0.1455
+  MFGP, seed=44... regret=0.0524
+  MFGP, seed=45... regret=0.0090
+  MFGP, seed=46... regret=0.0090
+  MFGP, seed=47... regret=0.0524
+  MFGP, seed=48... regret=0.0524
+  MFGP, seed=49... regret=0.0524
+  MFGP, seed=50... regret=0.1916
+  MFGP, seed=51... regret=0.0066
+  Sequential, seed=42... regret=0.3753
+  Sequential, seed=43... regret=0.1455
+  Sequential, seed=44... regret=0.6688
+  Sequential, seed=45... regret=0.0066
+  Sequential, seed=46... regret=0.3753
+  Sequential, seed=47... regret=2.6998
+  Sequential, seed=48... regret=0.1916
+  Sequential, seed=49... regret=0.2706
+  Sequential, seed=50... regret=0.9997
+  Sequential, seed=51... regret=0.0066
+  Progressive, seed=42... regret=3.5603
+  Progressive, seed=43... regret=3.7131
+  Progressive, seed=44... regret=0.6688
+  Progressive, seed=45... regret=0.6655
+  Progressive, seed=46... regret=1.4937
+  Progressive, seed=47... regret=0.1916
+  Progressive, seed=48... regret=1.9190
+  Progressive, seed=49... regret=0.4957
+  Progressive, seed=50... regret=2.5771
+  Progressive, seed=51... regret=1.6664
+  Curriculum, seed=42... regret=0.0066
+  Curriculum, seed=43... regret=0.0748
+  Curriculum, seed=44... regret=0.6688
+  Curriculum, seed=45... regret=0.6655
+  Curriculum, seed=46... regret=0.0972
+  Curriculum, seed=47... regret=0.4957
+  Curriculum, seed=48... regret=0.0748
+  Curriculum, seed=49... regret=0.0748
+  Curriculum, seed=50... regret=1.9190
+  Curriculum, seed=51... regret=0.1455
+  Two-Stage Joint, seed=42... regret=3.9413
+  Two-Stage Joint, seed=43... regret=3.0832
+  Two-Stage Joint, seed=44... regret=1.6067
+  Two-Stage Joint, seed=45... regret=0.6655
+  Two-Stage Joint, seed=46... regret=1.4937
+  Two-Stage Joint, seed=47... regret=6.4394
+  Two-Stage Joint, seed=48... regret=0.1455
+  Two-Stage Joint, seed=49... regret=0.2370
+  Two-Stage Joint, seed=50... regret=3.6209
+  Two-Stage Joint, seed=51... regret=3.6209
+  DNGO-Joint, seed=42... regret=0.6923
+  DNGO-Joint, seed=43... regret=0.4957
+  DNGO-Joint, seed=44... regret=0.0972
+  DNGO-Joint, seed=45... regret=0.0748
+  DNGO-Joint, seed=46... regret=0.3475
+  DNGO-Joint, seed=47... regret=0.2706
+  DNGO-Joint, seed=48... regret=0.1455
+  DNGO-Joint, seed=49... regret=0.2370
+  DNGO-Joint, seed=50... regret=0.1034
+  DNGO-Joint, seed=51... regret=0.0066
+  DNGO-Gradient, seed=42... regret=0.1455
+  DNGO-Gradient, seed=43... regret=0.1601
+  DNGO-Gradient, seed=44... regret=0.0972
+  DNGO-Gradient, seed=45... regret=0.0748
+  DNGO-Gradient, seed=46... regret=0.5631
+  DNGO-Gradient, seed=47... regret=0.0748
+  DNGO-Gradient, seed=48... regret=0.1455
+  DNGO-Gradient, seed=49... regret=0.1601
+  DNGO-Gradient, seed=50... regret=0.3475
+  DNGO-Gradient, seed=51... regret=0.0066
+  Knowledge Distillation, seed=42... regret=2.2043
+  Knowledge Distillation, seed=43... regret=0.8491
+  Knowledge Distillation, seed=44... regret=2.1543
+  Knowledge Distillation, seed=45... regret=0.0748
+  Knowledge Distillation, seed=46... regret=4.7294
+  Knowledge Distillation, seed=47... regret=0.1455
+  Knowledge Distillation, seed=48... regret=0.0748
+  Knowledge Distillation, seed=49... regret=0.1601
+  Knowledge Distillation, seed=50... regret=1.6664
+  Knowledge Distillation, seed=51... regret=0.1455
+  Domain Adaptation (MMD), seed=42... regret=1.5129
+  Domain Adaptation (MMD), seed=43... regret=2.2043
+  Domain Adaptation (MMD), seed=44... regret=1.8521
+  Domain Adaptation (MMD), seed=45... regret=0.4957
+  Domain Adaptation (MMD), seed=46... regret=3.0846
+  Domain Adaptation (MMD), seed=47... regret=0.2370
+  Domain Adaptation (MMD), seed=48... regret=2.4895
+  Domain Adaptation (MMD), seed=49... regret=0.0090
+  Domain Adaptation (MMD), seed=50... regret=2.2850
+  Domain Adaptation (MMD), seed=51... regret=1.4999
+  Soft Parameter Sharing, seed=42... regret=0.1455
+  Soft Parameter Sharing, seed=43... regret=0.1455
+  Soft Parameter Sharing, seed=44... regret=0.4144
+  Soft Parameter Sharing, seed=45... regret=0.0748
+  Soft Parameter Sharing, seed=46... regret=0.3753
+  Soft Parameter Sharing, seed=47... regret=0.3475
+  Soft Parameter Sharing, seed=48... regret=0.1601
+  Soft Parameter Sharing, seed=49... regret=0.5685
+  Soft Parameter Sharing, seed=50... regret=0.6655
+  Soft Parameter Sharing, seed=51... regret=0.1601
+  Pseudo-Labeling, seed=42... regret=3.5603
+  Pseudo-Labeling, seed=43... regret=0.1601
+  Pseudo-Labeling, seed=44... regret=0.5685
+  Pseudo-Labeling, seed=45... regret=0.0748
+  Pseudo-Labeling, seed=46... regret=3.6209
+  Pseudo-Labeling, seed=47... regret=0.8896
+  Pseudo-Labeling, seed=48... regret=0.2370
+  Pseudo-Labeling, seed=49... regret=0.0748
+  Pseudo-Labeling, seed=50... regret=1.6664
+  Pseudo-Labeling, seed=51... regret=0.0748
+  Adapter, seed=42... regret=0.1455
+  Adapter, seed=43... regret=0.0090
+  Adapter, seed=44... regret=0.3475
+  Adapter, seed=45... regret=0.2832
+  Adapter, seed=46... regret=0.6688
+  Adapter, seed=47... regret=0.1916
+  Adapter, seed=48... regret=0.1916
+  Adapter, seed=49... regret=0.2832
+  Adapter, seed=50... regret=1.3070
+  Adapter, seed=51... regret=0.8896
+
+Saved: results.csv
+
+Generating visualizations...
+Saved: Branin-Fav_comparison.png
+Saved: Branin-Unfav_comparison.png
+
+================================================================================
+SUMMARY (Mean Final Regret)
+================================================================================
+
+Branin-Fav:
+  DNGO-Joint                    : 0.2541 ± 0.1871
+  MFGP                          : 0.2717 ± 0.2397
+  Domain Adaptation (MMD)       : 0.2996 ± 0.2131
+  DNGO-Gradient                 : 0.3771 ± 0.2388
+  Pseudo-Labeling               : 0.4777 ± 0.5723
+  Knowledge Distillation        : 0.4978 ± 0.5868
+  Sequential                    : 0.5801 ± 0.4246
+  Soft Parameter Sharing        : 0.6065 ± 0.6243
+  Curriculum                    : 0.6384 ± 0.6805
+  Two-Stage Joint               : 0.6750 ± 0.5317
+  Adapter                       : 0.7081 ± 0.6614
+  Progressive                   : 0.7158 ± 0.6003
+
+Branin-Unfav:
+  MFGP                          : 0.0724 ± 0.0667
+  DNGO-Gradient                 : 0.1775 ± 0.1623
+  DNGO-Joint                    : 0.2471 ± 0.2139
+  Soft Parameter Sharing        : 0.3057 ± 0.2011
+  Curriculum                    : 0.4223 ± 0.5853
+  Adapter                       : 0.4317 ± 0.4026
+  Sequential                    : 0.5740 ± 0.8065
+  Pseudo-Labeling               : 1.0927 ± 1.4078
+  Knowledge Distillation        : 1.2204 ± 1.5111
+  Domain Adaptation (MMD)       : 1.5670 ± 1.0279
+  Progressive                   : 1.6951 ± 1.2576
+  Two-Stage Joint               : 2.4854 ± 2.0080
+
+================================================================================
+Done!
+Results saved to: benchmark_no_blr_20260115_055151
+================================================================================

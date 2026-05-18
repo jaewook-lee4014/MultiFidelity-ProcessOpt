@@ -1,0 +1,21 @@
+benchmark,model,strategy,seed,final_regret,n_hf,n_lf,best_y,elapsed_sec
+Park-Unfav,Knowledge Distillation,adaptive,42,1.087312731383618e-07,28,44,1.087312731383618e-07,84.208
+Park-Unfav,Knowledge Distillation,adaptive,43,1.087312731383618e-07,23,54,1.087312731383618e-07,67.954
+Park-Unfav,Knowledge Distillation,adaptive,44,1.087312731383618e-07,25,50,1.087312731383618e-07,66.499
+Park-Unfav,Knowledge Distillation,adaptive,45,1.087312731383618e-07,21,58,1.087312731383618e-07,68.727
+Park-Unfav,Knowledge Distillation,adaptive,46,1.087312731383618e-07,25,50,1.087312731383618e-07,64.906
+Park-Unfav,Knowledge Distillation,adaptive,47,1.087312731383618e-07,25,50,1.087312731383618e-07,65.932
+Park-Unfav,Knowledge Distillation,adaptive,48,1.087312731383618e-07,26,48,1.087312731383618e-07,64.089
+Park-Unfav,Knowledge Distillation,adaptive,49,1.087312731383618e-07,25,50,1.087312731383618e-07,65.218
+Park-Unfav,Knowledge Distillation,adaptive,50,1.087312731383618e-07,26,48,1.087312731383618e-07,64.536
+Park-Unfav,Knowledge Distillation,adaptive,51,1.087312731383618e-07,21,58,1.087312731383618e-07,67.838
+Park-Unfav,Knowledge Distillation,adaptive,52,1.087312731383618e-07,22,56,1.087312731383618e-07,68.133
+Park-Unfav,Knowledge Distillation,adaptive,53,1.087312731383618e-07,26,48,1.087312731383618e-07,64.291
+Park-Unfav,Knowledge Distillation,adaptive,54,1.087312731383618e-07,26,48,1.087312731383618e-07,66.418
+Park-Unfav,Knowledge Distillation,adaptive,55,1.087312731383618e-07,20,60,1.087312731383618e-07,70.928
+Park-Unfav,Knowledge Distillation,adaptive,56,1.087312731383618e-07,25,50,1.087312731383618e-07,65.905
+Park-Unfav,Knowledge Distillation,adaptive,57,1.087312731383618e-07,25,50,1.087312731383618e-07,65.84
+Park-Unfav,Knowledge Distillation,adaptive,58,1.087312731383618e-07,23,54,1.087312731383618e-07,64.96
+Park-Unfav,Knowledge Distillation,adaptive,59,1.087312731383618e-07,25,50,1.087312731383618e-07,63.687
+Park-Unfav,Knowledge Distillation,adaptive,60,1.087312731383618e-07,22,56,1.087312731383618e-07,66.984
+Park-Unfav,Knowledge Distillation,adaptive,61,1.087312731383618e-07,26,48,1.087312731383618e-07,61.066
